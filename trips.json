@@ -294,6 +294,13 @@
           "lat": 55.8600938,
           "lng": -4.2520273,
           "visited": false
+        },
+        {
+          "id": 1787855630662,
+          "name": "Collins Fountain",
+          "lat": 55.8532606,
+          "lng": -4.2453806,
+          "visited": false
         }
       ]
     }

@@ -1,11 +1,6 @@
 {
   "cities": [
     {
-      "id": "beispiel",
-      "name": "Beispielstadt",
-      "pois": []
-    },
-    {
       "id": "cork",
       "name": "Cork",
       "pois": [
@@ -63,40 +58,6 @@
           "name": "Oliver Plunkett Street",
           "lat": 51.8983095,
           "lng": -8.4688844,
-          "visited": false
-        }
-      ]
-    },
-    {
-      "id": "fislisbach",
-      "name": "Fislisbach",
-      "pois": [
-        {
-          "id": 1787846212205,
-          "name": "Hiltiberg",
-          "lat": 47.4300941,
-          "lng": 8.2960706,
-          "visited": false
-        },
-        {
-          "id": 1787846222145,
-          "name": "Migros",
-          "lat": 47.4362085,
-          "lng": 8.2899101,
-          "visited": false
-        },
-        {
-          "id": 1787846257821,
-          "name": "Linde",
-          "lat": 47.435259,
-          "lng": 8.2915556,
-          "visited": false
-        },
-        {
-          "id": 1787846954147,
-          "name": "Badenerstrasse 36c",
-          "lat": 47.4397348,
-          "lng": 8.2926641,
           "visited": false
         }
       ]

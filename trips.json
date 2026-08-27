@@ -61,6 +61,75 @@
           "visited": false
         }
       ]
+    },
+    {
+      "id": "dublin",
+      "name": "Dublin",
+      "pois": [
+        {
+          "id": 1787854388333,
+          "name": "James Joyce",
+          "lat": 53.3405879,
+          "lng": -6.258859,
+          "visited": false
+        },
+        {
+          "id": 1787854402227,
+          "name": "St. Patrick's Cathedral",
+          "lat": 53.3395644,
+          "lng": -6.2714758,
+          "visited": false
+        },
+        {
+          "id": 1787854412130,
+          "name": "Dublin Castle",
+          "lat": 53.3426623,
+          "lng": -6.2670042,
+          "visited": false
+        },
+        {
+          "id": 1787854422536,
+          "name": "Christ Church Cathedral",
+          "lat": 53.3434078,
+          "lng": -6.2712027,
+          "visited": false
+        },
+        {
+          "id": 1787854449985,
+          "name": "Spire of Dublin",
+          "lat": 53.3498019,
+          "lng": -6.2602542,
+          "visited": false
+        },
+        {
+          "id": 1787854457767,
+          "name": "Ha'Penny Bridge",
+          "lat": 53.3463273,
+          "lng": -6.2630949,
+          "visited": false
+        },
+        {
+          "id": 1787854464565,
+          "name": "Molly Malone",
+          "lat": 53.3437457,
+          "lng": -6.2608973,
+          "visited": false
+        },
+        {
+          "id": 1787854473329,
+          "name": "Phil Lynott",
+          "lat": 53.3412689,
+          "lng": -6.2608144,
+          "visited": false
+        },
+        {
+          "id": 1787854540025,
+          "name": "Moore Street",
+          "lat": 53.3502396,
+          "lng": -6.2625549,
+          "visited": false
+        }
+      ]
     }
   ]
 }

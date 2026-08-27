@@ -66,6 +66,33 @@
           "visited": false
         }
       ]
+    },
+    {
+      "id": "fislisbach",
+      "name": "Fislisbach",
+      "pois": [
+        {
+          "id": 1787846212205,
+          "name": "Hiltiberg",
+          "lat": 47.4300941,
+          "lng": 8.2960706,
+          "visited": false
+        },
+        {
+          "id": 1787846222145,
+          "name": "Migros",
+          "lat": 47.4362085,
+          "lng": 8.2899101,
+          "visited": false
+        },
+        {
+          "id": 1787846257821,
+          "name": "Linde",
+          "lat": 47.435259,
+          "lng": 8.2915556,
+          "visited": false
+        }
+      ]
     }
   ]
 }

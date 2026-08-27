@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CityTripp - Routen-Assistent</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background: #f4f4f9; color: #1c1c1e; }
+    .container { max-width: 700px; margin: 0 auto; }
+    .card { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 16px; }
+    h2, h3 { margin-top: 0; color: #2c3e50; }
+    select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 15px; font-weight: 600; margin-bottom: 12px; background: #fff; }
+    button { background: #007aff; color: white; border: none; padding: 10px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; margin-right: 6px; margin-bottom: 6px; }
+    button.secondary { background: #e5e5ea; color: #1c1c1e; }
+    button.success { background: #34c759; }
+    button.small { padding: 4px 8px; font-size: 12px; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { padding: 12px 0; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+    .visited { text-decoration: line-through; color: #8e8e93; }
+    .nav-btn { text-decoration: none; display: inline-block; padding: 8px 14px; background: #5856d6; color: white; border-radius: 8px; font-size: 14px; font-weight: 600; }
+    .metric-info { font-size: 13px; color: #555; margin-top: 4px; line-height: 1.4; }
+    .leg-badge { display: inline-block; font-size: 12px; font-weight: 600; background: #f0f4ff; color: #0056b3; padding: 2px 6px; border-radius: 4px; margin-bottom: 3px; }
+    .summary-box { background: #eef7ee; border: 1px solid #c8e6c9; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; color: #2e7d32; font-weight: 600; }
+    .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    a.admin-link { color: #007aff; text-decoration: none; font-size: 14px; font-weight: 600; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="top-bar">
+    <h2>CityTripp</h2>
+    <a href="admin.html" class="admin-link">⚙ Admin & Geocoder</a>
+  </div>
+
+  <div class="card">
+    <label><strong>Aktuelle Stadt:</strong></label>
+    <select id="citySelect" onchange="changeCity()"></select>
+    
+    <div>
+      <button onclick="updatePosition()">📍 GPS aktualisieren</button>
+      <button class="secondary" onclick="optimizeRemainingRoute()">⚡ Restroute optimieren (TSP)</button>
+      <button class="secondary small" onclick="loadFromGitHub(true)">🔄 Von GitHub neu laden</button>
+    </div>
+    <div id="status" style="margin-top: 8px; font-size: 13px; color: #555;">Standort: Initialisiere...</div>
+  </div>
+
+  <div class="card" id="next-suggestion">
+    <h3>Nächster Halt</h3>
+    <div id="suggestion-content">Berechne Fußwege...</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+      <h3 style="margin:0;">Geplante Stationen & Wegzeiten</h3>
+      <button class="secondary small" onclick="resetVisitedStatus()">Besuche zurücksetzen</button>
+    </div>
+    <div id="route-summary" class="summary-box" style="display:none;"></div>
+    <ul id="poi-list"></ul>
+  </div>
+</div>
+
+<script>
+  let data = null;
+  let activeCityId = null;
+  let currentPos = null;
+  let distanceCache = {};
+
+  async function loadFromGitHub() {
+    try {
+      document.getElementById('status').innerText = "Lade trips.json von GitHub...";
+      const res = await fetch(`./trips.json?nocache=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) throw new Error("trips.json nicht geladen");
+      data = await res.json();
+      
+      if (!activeCityId && data.cities.length > 0) {
+        activeCityId = data.cities[0].id;
+      }
+      distanceCache = {};
+      render();
+      updatePosition();
+    } catch (e) {
+      document.getElementById('status').innerText = "Fehler beim Laden von trips.json.";
+    }
+  }
+
+  function getActiveCity() {
+    if (!data || !data.cities || data.cities.length === 0) return null;
+    return data.cities.find(c => c.id === activeCityId) || data.cities[0];
+  }
+
+  function populateCitySelector() {
+    const select = document.getElementById('citySelect');
+    select.innerHTML = '';
+    if (!data || !data.cities) return;
+    data.cities.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      if (c.id === activeCityId) opt.selected = true;
+      select.appendChild(opt);
+    });
+  }
+
+  function changeCity() {
+    activeCityId = document.getElementById('citySelect').value;
+    const city = getActiveCity();
+    if (city && city.pois.length > 0 && !currentPos) {
+      currentPos = { lat: city.pois[0].lat, lng: city.pois[0].lng };
+    }
+    distanceCache = {};
+    render();
+  }
+
+  function getManhattanDistance(lat1, lon1, lat2, lon2) {
+    const latMid = ((lat1 + lat2) / 2) * (Math.PI / 180);
+    const dy = Math.abs(lat2 - lat1) * 111139;
+    const dx = Math.abs(lon2 - lon1) * 111139 * Math.cos(latMid);
+    return Math.round(dx + dy);
+  }
+
+  async function getFootDistance(p1, p2) {
+    if (!p1 || !p2) return { distance: 0, duration: 0, type: "N/A" };
+    const key = `${p1.lat.toFixed(5)},${p1.lng.toFixed(5)}_${p2.lat.toFixed(5)},${p2.lng.toFixed(5)}`;
+    if (distanceCache[key] !== undefined) return distanceCache[key];
+
+    const url = `https://router.project-osrm.org/route/v1/foot/${p1.lng},${p1.lat};${p2.lng},${p2.lat}?overview=false`;
+    try {
+      const response = await fetch(url);
+      const res = await response.json();
+      if (res.code === 'Ok' && res.routes && res.routes.length > 0) {
+        const meters = Math.round(res.routes[0].distance);
+        const durationMin = Math.round(res.routes[0].duration / 60);
+        const result = { distance: meters, duration: durationMin, type: "Fußweg" };
+        distanceCache[key] = result;
+        return result;
+      }
+    } catch (e) {}
+
+    const manhattan = getManhattanDistance(p1.lat, p1.lng, p2.lat, p2.lng);
+    const fallback = { distance: manhattan, duration: Math.round(manhattan / 80), type: "Manhattan" };
+    distanceCache[key] = fallback;
+    return fallback;
+  }
+
+  async function render() {
+    if (!data) return;
+    populateCitySelector();
+    const city = getActiveCity();
+    const list = document.getElementById('poi-list');
+    const summaryBox = document.getElementById('route-summary');
+    
+    if (!city || city.pois.length === 0) {
+      list.innerHTML = '<li><em>Keine Orte in dieser Stadt vorhanden.</em></li>';
+      document.getElementById('suggestion-content').innerHTML = 'Bitte Orte im Admin-Bereich erfassen.';
+      summaryBox.style.display = 'none';
+      return;
+    }
+
+    if (!currentPos) {
+      currentPos = { lat: city.pois[0].lat, lng: city.pois[0].lng };
+    }
+
+    list.innerHTML = '<li>Berechne Etappen-Wegzeiten...</li>';
+
+    // Berechnung der Etappen (Leg-by-Leg)
+    let totalMeters = 0;
+    let totalMinutes = 0;
+    let previousPoint = currentPos;
+    let unvisitedIndex = 0;
+
+    const legDetails = [];
+    for (let i = 0; i < city.pois.length; i++) {
+      const poi = city.pois[i];
+      if (poi.visited) {
+        legDetails.push({ visited: true });
+      } else {
+        const fromName = unvisitedIndex === 0 ? "aktuellem Standort" : `Station ${legDetails[unvisitedIndex - 1]?.name || 'vorheriger Station'}`;
+        const distInfo = await getFootDistance(previousPoint, poi);
+        totalMeters += distInfo.distance;
+        totalMinutes += distInfo.duration;
+        
+        legDetails.push({
+          visited: false,
+          name: poi.name,
+          from: fromName,
+          isFirst: unvisitedIndex === 0,
+          distInfo: distInfo
+        });
+        
+        previousPoint = poi;
+        unvisitedIndex++;
+      }
+    }
+
+    // Anzeige Gesamtrestzeit
+    const unvisitedCount = city.pois.filter(p => !p.visited).length;
+    if (unvisitedCount > 0) {
+      summaryBox.style.display = 'block';
+      const km = (totalMeters / 1000).toFixed(1);
+      summaryBox.innerHTML = `🚶 Verbleibende Route: <strong>~${totalMinutes} Min. reine Gehzeit</strong> (${km} km über ${unvisitedCount} Stationen)`;
+    } else {
+      summaryBox.style.display = 'none';
+    }
+
+    list.innerHTML = '';
+    city.pois.forEach((poi, index) => {
+      const leg = legDetails[index];
+      const li = document.createElement('li');
+      li.className = poi.visited ? 'visited' : '';
+      
+      let metricHtml = '';
+      if (!poi.visited && leg && leg.distInfo) {
+        const prefix = leg.isFirst ? '📍 Von aktuellem Standort:' : '↳ Von vorheriger Station:';
+        metricHtml = `
+          <div class="metric-info">
+            <span class="leg-badge">${prefix}</span> 
+            <strong>${leg.distInfo.duration} Min.</strong> (${leg.distInfo.distance} m) • <em>${leg.distInfo.type}</em>
+          </div>
+        `;
+      }
+
+      li.innerHTML = `
+        <div>
+          <strong>${index + 1}. ${poi.name}</strong>
+          ${metricHtml}
+        </div>
+        <div>
+          ${!poi.visited ? `<button class="success" onclick="markVisited(${poi.id})">✓</button>` : ''}
+        </div>
+      `;
+      list.appendChild(li);
+    });
+
+    await updateSuggestions();
+  }
+
+  async function updateSuggestions() {
+    const city = getActiveCity();
+    const unvisited = city.pois.filter(p => !p.visited);
+    const container = document.getElementById('suggestion-content');
+
+    if (unvisited.length === 0) {
+      container.innerHTML = "🎉 Alle Sehenswürdigkeiten in dieser Stadt besucht!";
+      return;
+    }
+
+    const plannedNext = unvisited[0];
+    const distPlanned = await getFootDistance(currentPos, plannedNext);
+
+    let nearest = unvisited[0];
+    let minDist = distPlanned.distance;
+    let nearestInfo = distPlanned;
+
+    for (let p of unvisited) {
+      const dInfo = await getFootDistance(currentPos, p);
+      if (dInfo.distance < minDist) {
+        minDist = dInfo.distance;
+        nearest = p;
+        nearestInfo = dInfo;
+      }
+    }
+
+    const gmapsLink = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${nearest.lat},${nearest.lng}&travelmode=walking`;
+
+    let html = `<p><strong>Geplant:</strong> ${plannedNext.name} (${distPlanned.distance} m, ~<strong>${distPlanned.duration} Min.</strong> Gehzeit)</p>`;
+    if (plannedNext.id !== nearest.id) {
+      html += `<p style="color: #d9534f;"><strong>Kürzerer Weg:</strong> ${nearest.name} (${nearestInfo.distance} m, ~<strong>${nearestInfo.duration} Min.</strong> Gehzeit)</p>
+               <button onclick="setNext(${nearest.id})">Zu ${nearest.name} wechseln</button>`;
+    }
+    html += `<div style="margin-top: 10px;"><a class="nav-btn" href="${gmapsLink}" target="_blank">🗺 In Google Maps navigieren</a></div>`;
+
+    container.innerHTML = html;
+  }
+
+  function markVisited(id) {
+    const city = getActiveCity();
+    const poi = city.pois.find(p => p.id === id);
+    if (poi) poi.visited = true;
+    render();
+  }
+
+  function resetVisitedStatus() {
+    const city = getActiveCity();
+    city.pois.forEach(p => p.visited = false);
+    render();
+  }
+
+  function setNext(id) {
+    const city = getActiveCity();
+    const idx = city.pois.findIndex(p => p.id === id);
+    const [item] = city.pois.splice(idx, 1);
+    const firstUnvisitedIdx = city.pois.findIndex(p => !p.visited);
+    city.pois.splice(firstUnvisitedIdx, 0, item);
+    render();
+  }
+
+  async function optimizeRemainingRoute() {
+    const city = getActiveCity();
+    const visited = city.pois.filter(p => p.visited);
+    let unvisited = city.pois.filter(p => !p.visited);
+
+    let current = currentPos;
+    let ordered = [];
+
+    while (unvisited.length > 0) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+
+      for (let i = 0; i < unvisited.length; i++) {
+        const d = await getFootDistance(current, unvisited[i]);
+        if (d.distance < bestDist) {
+          bestDist = d.distance;
+          bestIdx = i;
+        }
+      }
+      const next = unvisited.splice(bestIdx, 1)[0];
+      ordered.push(next);
+      current = next;
+    }
+
+    city.pois = [...visited, ...ordered];
+    render();
+  }
+
+  function updatePosition() {
+    if (navigator.geolocation) {
+      document.getElementById('status').innerText = "Standort wird ermittelt...";
+      navigator.geolocation.getCurrentPosition(pos => {
+        currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        document.getElementById('status').innerText = `Live-GPS aktiv (${currentPos.lat.toFixed(4)}, ${currentPos.lng.toFixed(4)})`;
+        render();
+      }, () => {
+        document.getElementById('status').innerText = "GPS nicht verfügbar. Nutze Standardposition.";
+        render();
+      });
+    }
+  }
+
+  loadFromGitHub();
+</script>
+</body>
+</html>

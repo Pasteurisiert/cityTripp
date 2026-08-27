@@ -196,6 +196,104 @@
           "lat": 55.8611567,
           "lng": -4.2502189,
           "visited": false
+        },
+        {
+          "id": 1787854819705,
+          "name": "Glasgow City Chambers",
+          "lat": 55.8609898,
+          "lng": -4.2487742,
+          "visited": false
+        },
+        {
+          "id": 1787854828563,
+          "name": "Ingram Street",
+          "lat": 55.8591607,
+          "lng": -4.2421827,
+          "visited": false
+        },
+        {
+          "id": 1787854837269,
+          "name": "Sharmanka Kinetic Theatre/Gallery",
+          "lat": 55.8570154,
+          "lng": -4.246766,
+          "visited": false
+        },
+        {
+          "id": 1787854923601,
+          "name": "britannia panopticon",
+          "lat": 55.8569611,
+          "lng": -4.2470152,
+          "visited": false
+        },
+        {
+          "id": 1787854936597,
+          "name": "Tolbooth Steeple",
+          "lat": 55.8568242,
+          "lng": -4.243606,
+          "visited": false
+        },
+        {
+          "id": 1787854968677,
+          "name": "Glickman's",
+          "lat": 55.8546491,
+          "lng": -4.2397593,
+          "visited": false
+        },
+        {
+          "id": 1787854994328,
+          "name": "People's Palace",
+          "lat": 55.8513092,
+          "lng": -4.2369976,
+          "visited": false
+        },
+        {
+          "id": 1787855000948,
+          "name": "Nelson's Monument",
+          "lat": 55.851483,
+          "lng": -4.2406797,
+          "visited": false
+        },
+        {
+          "id": 1787855010461,
+          "name": "St. Andrew's Cathedral",
+          "lat": 55.8554787,
+          "lng": -4.2529452,
+          "visited": false
+        },
+        {
+          "id": 1787855017023,
+          "name": "Buchanan Street",
+          "lat": 55.862413,
+          "lng": -4.253398,
+          "visited": false
+        },
+        {
+          "id": 1787855023839,
+          "name": "The Lighthouse",
+          "lat": 55.8596561,
+          "lng": -4.255458,
+          "visited": false
+        },
+        {
+          "id": 1787855030129,
+          "name": "Willow Tea Rooms",
+          "lat": 55.8599712,
+          "lng": -4.2545239,
+          "visited": false
+        },
+        {
+          "id": 1787855036745,
+          "name": "Gallery of Modern Art",
+          "lat": 55.8601675,
+          "lng": -4.2526408,
+          "visited": false
+        },
+        {
+          "id": 1787855043040,
+          "name": "Duke of Wellington",
+          "lat": 55.8600938,
+          "lng": -4.2520273,
+          "visited": false
         }
       ]
     }

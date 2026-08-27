@@ -16,11 +16,11 @@
     button.small { padding: 4px 8px; font-size: 12px; }
     ul { list-style: none; padding: 0; margin: 0; }
     li { padding: 12px 0; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+    li.start-endpoint { background: #f0f7ff; border-radius: 8px; padding: 10px 12px; margin-top: 8px; border: 1px dashed #007aff; }
     .visited { text-decoration: line-through; color: #8e8e93; }
-    .nav-btn { text-decoration: none; display: inline-block; padding: 8px 14px; background: #5856d6; color: white; border-radius: 8px; font-size: 14px; font-weight: 600; }
-    .metric-info { font-size: 13px; color: #555; margin-top: 4px; line-height: 1.4; }
-    .leg-badge { display: inline-block; font-size: 12px; font-weight: 600; background: #f0f4ff; color: #0056b3; padding: 2px 6px; border-radius: 4px; margin-bottom: 3px; }
-    .summary-box { background: #eef7ee; border: 1px solid #c8e6c9; padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; color: #2e7d32; font-weight: 600; }
+    .badge { font-size: 12px; padding: 3px 8px; border-radius: 6px; background: #e5f1ff; color: #007aff; font-weight: 500; }
+    .nav-btn { text-decoration: none; display: inline-block; padding: 8px 14px; background: #5856d6; color: white; border-radius: 8px; font-size: 14px; font-weight: 600; text-align: center; }
+    .metric-info { font-size: 12px; color: #666; margin-top: 4px; }
     .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
     a.admin-link { color: #007aff; text-decoration: none; font-size: 14px; font-weight: 600; }
   </style>
@@ -38,8 +38,8 @@
     
     <div>
       <button onclick="updatePosition()">📍 GPS aktualisieren</button>
-      <button class="secondary" onclick="optimizeRemainingRoute()">⚡ Restroute optimieren (TSP)</button>
-      <button class="secondary small" onclick="loadFromGitHub(true)">🔄 Von GitHub neu laden</button>
+      <button onclick="setStartPointHere()">🏨 Hier als Start/Ziel merken</button>
+      <button class="secondary" onclick="optimizeRemainingRoute()">⚡ Rundtour optimieren (TSP)</button>
     </div>
     <div id="status" style="margin-top: 8px; font-size: 13px; color: #555;">Standort: Initialisiere...</div>
   </div>
@@ -50,12 +50,11 @@
   </div>
 
   <div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-      <h3 style="margin:0;">Geplante Stationen & Wegzeiten</h3>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="margin:0;">Geplante Stationen & Rückweg</h3>
       <button class="secondary small" onclick="resetVisitedStatus()">Besuche zurücksetzen</button>
     </div>
-    <div id="route-summary" class="summary-box" style="display:none;"></div>
-    <ul id="poi-list"></ul>
+    <ul id="poi-list" style="margin-top: 12px;"></ul>
   </div>
 </div>
 
@@ -63,24 +62,49 @@
   let data = null;
   let activeCityId = null;
   let currentPos = null;
+  let startPoint = null; // Fester Start- und Rückkehrpunkt
   let distanceCache = {};
 
   async function loadFromGitHub() {
     try {
-      document.getElementById('status').innerText = "Lade trips.json von GitHub...";
+      document.getElementById('status').innerText = "Lade trips.json frisch von GitHub...";
       const res = await fetch(`./trips.json?nocache=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) throw new Error("trips.json nicht geladen");
+      if (!res.ok) throw new Error("trips.json nicht erreichbar");
       data = await res.json();
       
       if (!activeCityId && data.cities.length > 0) {
         activeCityId = data.cities[0].id;
       }
       distanceCache = {};
+      loadStartPointForCity();
       render();
       updatePosition();
     } catch (e) {
       document.getElementById('status').innerText = "Fehler beim Laden von trips.json.";
     }
+  }
+
+  function loadStartPointForCity() {
+    const saved = localStorage.getItem(`cityTripp_startPoint_${activeCityId}`);
+    if (saved) {
+      startPoint = JSON.parse(saved);
+    } else {
+      startPoint = null;
+    }
+  }
+
+  function setStartPointHere() {
+    if (!currentPos) {
+      alert("GPS-Position noch nicht erfasst. Bitte kurz warten oder GPS aktivieren.");
+      return;
+    }
+    const name = prompt("Name für Start-/Rückkehrpunkt (z. B. Mein Hotel, Bahnhof):", "Mein Hotel / Ausgangspunkt");
+    if (!name) return;
+
+    startPoint = { name: name, lat: currentPos.lat, lng: currentPos.lng };
+    localStorage.setItem(`cityTripp_startPoint_${activeCityId}`, JSON.stringify(startPoint));
+    document.getElementById('status').innerText = `Start-/Rückkehrpunkt gesetzt: "${name}"`;
+    render();
   }
 
   function getActiveCity() {
@@ -103,11 +127,11 @@
 
   function changeCity() {
     activeCityId = document.getElementById('citySelect').value;
+    loadStartPointForCity();
     const city = getActiveCity();
     if (city && city.pois.length > 0 && !currentPos) {
       currentPos = { lat: city.pois[0].lat, lng: city.pois[0].lng };
     }
-    distanceCache = {};
     render();
   }
 
@@ -142,17 +166,109 @@
     return fallback;
   }
 
+  async function calculateTotalPathWithEnd(origin, route, end) {
+    let totalDist = 0;
+    let totalDur = 0;
+    let curr = origin;
+
+    for (let point of route) {
+      const metric = await getFootDistance(curr, point);
+      totalDist += metric.distance;
+      totalDur += metric.duration;
+      curr = point;
+    }
+
+    // Rückweg zum Startpunkt am Ende mit einberechnen
+    if (end) {
+      const returnMetric = await getFootDistance(curr, end);
+      totalDist += returnMetric.distance;
+      totalDur += returnMetric.duration;
+    }
+
+    return { totalDist, totalDur };
+  }
+
+  async function optimizeRemainingRoute() {
+    const city = getActiveCity();
+    const visited = city.pois.filter(p => p.visited);
+    let unvisited = city.pois.filter(p => !p.visited);
+
+    if (unvisited.length === 0) return;
+
+    document.getElementById('status').innerText = "Berechne beste Rundtour inklusive Rückweg...";
+
+    // Matrix vorwärmen
+    const allPoints = [currentPos, ...unvisited];
+    if (startPoint) allPoints.push(startPoint);
+
+    const prefetch = [];
+    for (let i = 0; i < allPoints.length; i++) {
+      for (let j = 0; j < allPoints.length; j++) {
+        if (i !== j) prefetch.push(getFootDistance(allPoints[i], allPoints[j]));
+      }
+    }
+    await Promise.all(prefetch);
+
+    let bestOrder = [];
+    let minTotalDistance = Infinity;
+
+    // TSP Brute-Force für bis zu 8 offene Stationen
+    if (unvisited.length <= 8) {
+      function permute(arr) {
+        if (arr.length <= 1) return [arr];
+        let result = [];
+        for (let i = 0; i < arr.length; i++) {
+          const current = arr[i];
+          const remaining = arr.slice(0, i).concat(arr.slice(i + 1));
+          for (let p of permute(remaining)) {
+            result.push([current].concat(p));
+          }
+        }
+        return result;
+      }
+
+      const allPermutations = permute(unvisited);
+      for (let route of allPermutations) {
+        const { totalDist } = await calculateTotalPathWithEnd(currentPos, route, startPoint);
+        if (totalDist < minTotalDistance) {
+          minTotalDistance = totalDist;
+          bestOrder = route;
+        }
+      }
+    } else {
+      // 2-Opt Heuristik mit festem Endpunkt
+      let pool = [...unvisited];
+      let current = currentPos;
+      while (pool.length > 0) {
+        let bestI = 0, bDist = Infinity;
+        for (let i = 0; i < pool.length; i++) {
+          const d = (await getFootDistance(current, pool[i])).distance;
+          if (d < bDist) { bDist = d; bestI = i; }
+        }
+        bestOrder.push(pool.splice(bestI, 1)[0]);
+        current = bestOrder[bestOrder.length - 1];
+      }
+    }
+
+    city.pois = [...visited, ...bestOrder];
+    const metrics = await calculateTotalPathWithEnd(currentPos, bestOrder, startPoint);
+    
+    let info = `Rundtour optimiert! Gesamtweg: ${(metrics.totalDist / 1000).toFixed(2)} km (~${metrics.totalDur} Min.)`;
+    if (startPoint) info += ` inkl. Rückkehr zu "${startPoint.name}"`;
+    document.getElementById('status').innerText = info;
+
+    render();
+  }
+
   async function render() {
     if (!data) return;
     populateCitySelector();
     const city = getActiveCity();
     const list = document.getElementById('poi-list');
-    const summaryBox = document.getElementById('route-summary');
     
     if (!city || city.pois.length === 0) {
-      list.innerHTML = '<li><em>Keine Orte in dieser Stadt vorhanden.</em></li>';
-      document.getElementById('suggestion-content').innerHTML = 'Bitte Orte im Admin-Bereich erfassen.';
-      summaryBox.style.display = 'none';
+      list.innerHTML = '<li><em>Keine Orte in dieser Stadt eingetragen.</em></li>';
+      document.getElementById('suggestion-content').innerHTML = 'Bitte Orte im Admin-Bereich anlegen.';
       return;
     }
 
@@ -160,69 +276,18 @@
       currentPos = { lat: city.pois[0].lat, lng: city.pois[0].lng };
     }
 
-    list.innerHTML = '<li>Berechne Etappen-Wegzeiten...</li>';
-
-    // Berechnung der Etappen (Leg-by-Leg)
-    let totalMeters = 0;
-    let totalMinutes = 0;
-    let previousPoint = currentPos;
-    let unvisitedIndex = 0;
-
-    const legDetails = [];
-    for (let i = 0; i < city.pois.length; i++) {
-      const poi = city.pois[i];
-      if (poi.visited) {
-        legDetails.push({ visited: true });
-      } else {
-        const fromName = unvisitedIndex === 0 ? "aktuellem Standort" : `Station ${legDetails[unvisitedIndex - 1]?.name || 'vorheriger Station'}`;
-        const distInfo = await getFootDistance(previousPoint, poi);
-        totalMeters += distInfo.distance;
-        totalMinutes += distInfo.duration;
-        
-        legDetails.push({
-          visited: false,
-          name: poi.name,
-          from: fromName,
-          isFirst: unvisitedIndex === 0,
-          distInfo: distInfo
-        });
-        
-        previousPoint = poi;
-        unvisitedIndex++;
-      }
-    }
-
-    // Anzeige Gesamtrestzeit
-    const unvisitedCount = city.pois.filter(p => !p.visited).length;
-    if (unvisitedCount > 0) {
-      summaryBox.style.display = 'block';
-      const km = (totalMeters / 1000).toFixed(1);
-      summaryBox.innerHTML = `🚶 Verbleibende Route: <strong>~${totalMinutes} Min. reine Gehzeit</strong> (${km} km über ${unvisitedCount} Stationen)`;
-    } else {
-      summaryBox.style.display = 'none';
-    }
+    list.innerHTML = '<li>Lade Distanzen...</li>';
+    const distances = await Promise.all(city.pois.map(p => getFootDistance(currentPos, p)));
 
     list.innerHTML = '';
     city.pois.forEach((poi, index) => {
-      const leg = legDetails[index];
+      const distInfo = distances[index];
       const li = document.createElement('li');
       li.className = poi.visited ? 'visited' : '';
-      
-      let metricHtml = '';
-      if (!poi.visited && leg && leg.distInfo) {
-        const prefix = leg.isFirst ? '📍 Von aktuellem Standort:' : '↳ Von vorheriger Station:';
-        metricHtml = `
-          <div class="metric-info">
-            <span class="leg-badge">${prefix}</span> 
-            <strong>${leg.distInfo.duration} Min.</strong> (${leg.distInfo.distance} m) • <em>${leg.distInfo.type}</em>
-          </div>
-        `;
-      }
-
       li.innerHTML = `
         <div>
           <strong>${index + 1}. ${poi.name}</strong>
-          ${metricHtml}
+          <div class="metric-info">${distInfo.distance} m (~${distInfo.duration} Min.) • <em>${distInfo.type}</em></div>
         </div>
         <div>
           ${!poi.visited ? `<button class="success" onclick="markVisited(${poi.id})">✓</button>` : ''}
@@ -231,7 +296,28 @@
       list.appendChild(li);
     });
 
+    // Fester Start-/Endpunkt am Listenende
+    if (startPoint) {
+      const endDist = await getFootDistance(currentPos, startPoint);
+      const endLi = document.createElement('li');
+      endLi.className = 'start-endpoint';
+      endLi.innerHTML = `
+        <div>
+          <strong>🏁 Ziel / Rückkehr: ${startPoint.name}</strong>
+          <div class="metric-info">${endDist.distance} m Luft-/Fußlinie von aktuellem GPS (~${endDist.duration} Min.)</div>
+        </div>
+        <button class="secondary small" onclick="clearStartPoint()">Entfernen</button>
+      `;
+      list.appendChild(endLi);
+    }
+
     await updateSuggestions();
+  }
+
+  function clearStartPoint() {
+    startPoint = null;
+    localStorage.removeItem(`cityTripp_startPoint_${activeCityId}`);
+    render();
   }
 
   async function updateSuggestions() {
@@ -239,8 +325,18 @@
     const unvisited = city.pois.filter(p => !p.visited);
     const container = document.getElementById('suggestion-content');
 
-    if (!unvisited || unvisited.length === 0) {
-      container.innerHTML = "🎉 Alle Sehenswürdigkeiten in dieser Stadt besucht!";
+    if (unvisited.length === 0) {
+      if (startPoint) {
+        const dHome = await getFootDistance(currentPos, startPoint);
+        const homeUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${startPoint.lat},${startPoint.lng}&travelmode=walking`;
+        container.innerHTML = `
+          <p>🎉 Alle Orte besucht!</p>
+          <p><strong>Rückweg zum Ausgangspunkt:</strong> ${startPoint.name} (${dHome.distance} m, ~${dHome.duration} Min.)</p>
+          <a class="nav-btn" href="${homeUrl}" target="_blank">🏨 Zurück zu ${startPoint.name} navigieren</a>
+        `;
+      } else {
+        container.innerHTML = "🎉 Alle Sehenswürdigkeiten in dieser Stadt besucht!";
+      }
       return;
     }
 
@@ -260,20 +356,23 @@
       }
     }
 
-    // 1. Link nur zum nächsten Halt
     const singleNavUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${plannedNext.lat},${plannedNext.lng}&travelmode=walking`;
 
-    // 2. Link für die GESAMTE Restroute (Multi-Stop mit Waypoints)
+    // Multi-Stop Route inkl. Start-/Endpunkt am Schluss
     let fullRouteUrl = "";
-    if (unvisited.length === 1) {
+    const routeStops = [...unvisited];
+    if (startPoint) {
+      routeStops.push(startPoint);
+    }
+
+    if (routeStops.length === 1) {
       fullRouteUrl = singleNavUrl;
     } else {
-      // Google Maps erlaubt max. 9 Zwischenstopps/Destination
-      const routeSlice = unvisited.slice(0, 9);
+      const routeSlice = routeStops.slice(0, 9); // Google Maps Waypoints Limit
       const destination = routeSlice[routeSlice.length - 1];
       const waypoints = routeSlice.slice(0, routeSlice.length - 1)
         .map(p => `${p.lat},${p.lng}`)
-        .join('%7C'); // URL-encoded |
+        .join('%7C');
 
       fullRouteUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${destination.lat},${destination.lng}&waypoints=${waypoints}&travelmode=walking`;
     }
@@ -285,16 +384,16 @@
                <button onclick="setNext(${nearest.id})">Zu ${nearest.name} wechseln</button>`;
     }
 
+    const endNotice = startPoint ? ` inkl. Rückweg zu "${startPoint.name}"` : '';
     html += `
       <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
         <a class="nav-btn" href="${singleNavUrl}" target="_blank">🚶 Nur zum nächsten Halt navigieren</a>
-        <a class="nav-btn" style="background:#007aff;" href="${fullRouteUrl}" target="_blank">🗺 Gesamte Restroute (${unvisited.length} Orte) in Google Maps anzeigen</a>
+        <a class="nav-btn" style="background:#007aff;" href="${fullRouteUrl}" target="_blank">🗺 Gesamte Rundtour in Google Maps öffnen${endNotice}</a>
       </div>
     `;
 
     container.innerHTML = html;
   }
-
 
   function markVisited(id) {
     const city = getActiveCity();
@@ -315,120 +414,6 @@
     const [item] = city.pois.splice(idx, 1);
     const firstUnvisitedIdx = city.pois.findIndex(p => !p.visited);
     city.pois.splice(firstUnvisitedIdx, 0, item);
-    render();
-  }
-
-  // Berechnet die Gesamtlänge einer beliebigen Route (Distanz oder Dauer)
-  async function calculateTotalPathMetrics(origin, route) {
-    let totalDist = 0;
-    let totalDur = 0;
-    let curr = origin;
-
-    for (let point of route) {
-      const metric = await getFootDistance(curr, point);
-      totalDist += metric.distance;
-      totalDur += metric.duration;
-      curr = point;
-    }
-    return { totalDist, totalDur };
-  }
-
-  // Echte TSP-Routenoptimierung für die Gesamtlänge
-  async function optimizeRemainingRoute() {
-    const city = getActiveCity();
-    const visited = city.pois.filter(p => p.visited);
-    let unvisited = city.pois.filter(p => !p.visited);
-
-    if (unvisited.length <= 1) return;
-
-    document.getElementById('status').innerText = "Berechne globale Bestroute...";
-
-    // 1. Alle benötigten Distanzen vorab cachen (Matrix vorwärmen)
-    const allPoints = [currentPos, ...unvisited];
-    const prefetchPromises = [];
-    for (let i = 0; i < allPoints.length; i++) {
-      for (let j = 0; j < allPoints.length; j++) {
-        if (i !== j) prefetchPromises.push(getFootDistance(allPoints[i], allPoints[j]));
-      }
-    }
-    await Promise.all(prefetchPromises);
-
-    let bestOrder = [];
-    let minTotalDistance = Infinity;
-
-    // 2A. Exakter Algorithmus (Brute-Force Permutationen) für bis zu 8 Orte
-    if (unvisited.length <= 8) {
-      function permute(arr) {
-        if (arr.length <= 1) return [arr];
-        let result = [];
-        for (let i = 0; i < arr.length; i++) {
-          const current = arr[i];
-          const remaining = arr.slice(0, i).concat(arr.slice(i + 1));
-          for (let p of permute(remaining)) {
-            result.push([current].concat(p));
-          }
-        }
-        return result;
-      }
-
-      const allPermutations = permute(unvisited);
-
-      for (let route of allPermutations) {
-        const { totalDist } = await calculateTotalPathMetrics(currentPos, route);
-        if (totalDist < minTotalDistance) {
-          minTotalDistance = totalDist;
-          bestOrder = route;
-        }
-      }
-    } 
-    // 2B. 2-Opt Heuristik für mehr als 8 Orte (beseitigt Schleifen & Überkreuzungen)
-    else {
-      // Start-Reihenfolge mit Nearest Neighbor
-      let pool = [...unvisited];
-      let current = currentPos;
-      while (pool.length > 0) {
-        let bestI = 0, bDist = Infinity;
-        for (let i = 0; i < pool.length; i++) {
-          const d = (await getFootDistance(current, pool[i])).distance;
-          if (d < bDist) { bDist = d; bestI = i; }
-        }
-        const next = pool.splice(bestI, 1)[0];
-        bestOrder.push(next);
-        current = next;
-      }
-
-      // 2-Opt Tausch-Optimierung
-      let improved = true;
-      while (improved) {
-        improved = false;
-        const currentBest = (await calculateTotalPathMetrics(currentPos, bestOrder)).totalDist;
-
-        for (let i = 0; i < bestOrder.length - 1; i++) {
-          for (let k = i + 1; k < bestOrder.length; k++) {
-            // Segmente umkehren
-            const newRoute = bestOrder.slice(0, i)
-              .concat(bestOrder.slice(i, k + 1).reverse())
-              .concat(bestOrder.slice(k + 1));
-
-            const newDist = (await calculateTotalPathMetrics(currentPos, newRoute)).totalDist;
-            if (newDist < currentBest) {
-              bestOrder = newRoute;
-              improved = true;
-              break;
-            }
-          }
-          if (improved) break;
-        }
-      }
-    }
-
-    // Neue, global optimale Reihenfolge zuweisen
-    city.pois = [...visited, ...bestOrder];
-    
-    const finalMetrics = await calculateTotalPathMetrics(currentPos, bestOrder);
-    document.getElementById('status').innerText = 
-      `Route optimiert! Gesamtweg: ${(finalMetrics.totalDist / 1000).toFixed(2)} km (~${finalMetrics.totalDur} Min. Gehzeit)`;
-
     render();
   }
 

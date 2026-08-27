@@ -91,6 +91,13 @@
           "lat": 47.435259,
           "lng": 8.2915556,
           "visited": false
+        },
+        {
+          "id": 1787846954147,
+          "name": "Badenerstrasse 36c",
+          "lat": 47.4397348,
+          "lng": 8.2926641,
+          "visited": false
         }
       ]
     }

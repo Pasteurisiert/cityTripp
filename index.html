@@ -294,31 +294,117 @@
     render();
   }
 
+  // Berechnet die Gesamtlänge einer beliebigen Route (Distanz oder Dauer)
+  async function calculateTotalPathMetrics(origin, route) {
+    let totalDist = 0;
+    let totalDur = 0;
+    let curr = origin;
+
+    for (let point of route) {
+      const metric = await getFootDistance(curr, point);
+      totalDist += metric.distance;
+      totalDur += metric.duration;
+      curr = point;
+    }
+    return { totalDist, totalDur };
+  }
+
+  // Echte TSP-Routenoptimierung für die Gesamtlänge
   async function optimizeRemainingRoute() {
     const city = getActiveCity();
     const visited = city.pois.filter(p => p.visited);
     let unvisited = city.pois.filter(p => !p.visited);
 
-    let current = currentPos;
-    let ordered = [];
+    if (unvisited.length <= 1) return;
 
-    while (unvisited.length > 0) {
-      let bestIdx = 0;
-      let bestDist = Infinity;
+    document.getElementById('status').innerText = "Berechne globale Bestroute...";
 
-      for (let i = 0; i < unvisited.length; i++) {
-        const d = await getFootDistance(current, unvisited[i]);
-        if (d.distance < bestDist) {
-          bestDist = d.distance;
-          bestIdx = i;
+    // 1. Alle benötigten Distanzen vorab cachen (Matrix vorwärmen)
+    const allPoints = [currentPos, ...unvisited];
+    const prefetchPromises = [];
+    for (let i = 0; i < allPoints.length; i++) {
+      for (let j = 0; j < allPoints.length; j++) {
+        if (i !== j) prefetchPromises.push(getFootDistance(allPoints[i], allPoints[j]));
+      }
+    }
+    await Promise.all(prefetchPromises);
+
+    let bestOrder = [];
+    let minTotalDistance = Infinity;
+
+    // 2A. Exakter Algorithmus (Brute-Force Permutationen) für bis zu 8 Orte
+    if (unvisited.length <= 8) {
+      function permute(arr) {
+        if (arr.length <= 1) return [arr];
+        let result = [];
+        for (let i = 0; i < arr.length; i++) {
+          const current = arr[i];
+          const remaining = arr.slice(0, i).concat(arr.slice(i + 1));
+          for (let p of permute(remaining)) {
+            result.push([current].concat(p));
+          }
+        }
+        return result;
+      }
+
+      const allPermutations = permute(unvisited);
+
+      for (let route of allPermutations) {
+        const { totalDist } = await calculateTotalPathMetrics(currentPos, route);
+        if (totalDist < minTotalDistance) {
+          minTotalDistance = totalDist;
+          bestOrder = route;
         }
       }
-      const next = unvisited.splice(bestIdx, 1)[0];
-      ordered.push(next);
-      current = next;
+    } 
+    // 2B. 2-Opt Heuristik für mehr als 8 Orte (beseitigt Schleifen & Überkreuzungen)
+    else {
+      // Start-Reihenfolge mit Nearest Neighbor
+      let pool = [...unvisited];
+      let current = currentPos;
+      while (pool.length > 0) {
+        let bestI = 0, bDist = Infinity;
+        for (let i = 0; i < pool.length; i++) {
+          const d = (await getFootDistance(current, pool[i])).distance;
+          if (d < bDist) { bDist = d; bestI = i; }
+        }
+        const next = pool.splice(bestI, 1)[0];
+        bestOrder.push(next);
+        current = next;
+      }
+
+      // 2-Opt Tausch-Optimierung
+      let improved = true;
+      while (improved) {
+        improved = false;
+        const currentBest = (await calculateTotalPathMetrics(currentPos, bestOrder)).totalDist;
+
+        for (let i = 0; i < bestOrder.length - 1; i++) {
+          for (let k = i + 1; k < bestOrder.length; k++) {
+            // Segmente umkehren
+            const newRoute = bestOrder.slice(0, i)
+              .concat(bestOrder.slice(i, k + 1).reverse())
+              .concat(bestOrder.slice(k + 1));
+
+            const newDist = (await calculateTotalPathMetrics(currentPos, newRoute)).totalDist;
+            if (newDist < currentBest) {
+              bestOrder = newRoute;
+              improved = true;
+              break;
+            }
+          }
+          if (improved) break;
+        }
+      }
     }
 
-    city.pois = [...visited, ...ordered];
+    // Neue, global optimale Reihenfolge zuweisen
+    city.pois = [...visited, ...bestOrder];
+    
+    const finalMetrics = await calculateTotalPathMetrics(currentPos, bestOrder);
+    document.getElementById('status').innerText = 
+      `Route optimiert! Gesamtweg: ${(finalMetrics.totalDist / 1000).toFixed(2)} km (~${finalMetrics.totalDur} Min. Gehzeit)`;
+
     render();
   }
 

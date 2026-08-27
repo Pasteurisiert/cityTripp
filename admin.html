@@ -31,22 +31,32 @@
     <a href="index.html" style="color:#007aff; text-decoration:none; font-weight:600;">Zur Routen-App →</a>
   </div>
 
-  <!-- 1. GitHub API Setup -->
+  <!-- 1. GitHub Setup -->
   <div class="card">
-    <h3>1. GitHub Konfiguration</h3>
+    <h3>1. GitHub Verbindung</h3>
     <div class="row">
       <div>
-        <label>GitHub Benutzername:</label>
-        <input type="text" id="ghOwner" placeholder="z.B. mein-name">
+        <label>Benutzername / Organisation:</label>
+        <input type="text" id="ghOwner" placeholder="z.B. maxmustermann">
       </div>
       <div>
         <label>Repository Name:</label>
-        <input type="text" id="ghRepo" placeholder="cityTripp">
+        <input type="text" id="ghRepo" placeholder="z.B. cityTripp">
       </div>
     </div>
-    <label>GitHub Token (Fine-grained oder Classic mit 'repo'-Rechten):</label>
-    <input type="password" id="ghToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
-    <button onclick="saveGitHubConfig()">Einstellungen speichern & trips.json laden</button>
+    <div class="row">
+      <div>
+        <label>Pfad zur JSON-Datei im Repo:</label>
+        <input type="text" id="ghPath" value="trips.json" placeholder="trips.json oder cityTripp/trips.json">
+      </div>
+      <div>
+        <label>Branch:</label>
+        <input type="text" id="ghBranch" value="main" placeholder="main">
+      </div>
+    </div>
+    <label>GitHub Personal Access Token (PAT):</label>
+    <input type="password" id="ghToken" placeholder="github_pat_... oder ghp_...">
+    <button onclick="saveAndLoad()">💾 Einstellungen speichern & trips.json laden</button>
     <div id="ghStatus" class="status-msg"></div>
   </div>
 
@@ -67,13 +77,13 @@
     </div>
   </div>
 
-  <!-- 3. Sehenswürdigkeit suchen & hinzufügen -->
+  <!-- 3. Sehenswürdigkeit suchen -->
   <div class="card">
     <h3>3. Sehenswürdigkeit hinzufügen (Automatische Koordinaten)</h3>
     <label>Name der Sehenswürdigkeit:</label>
     <div class="row">
       <div>
-        <input type="text" id="poiQuery" placeholder="z.B. Trinity College Library oder St Patrick's Cathedral">
+        <input type="text" id="poiQuery" placeholder="z.B. Trinity College oder St Patrick's Cathedral">
       </div>
       <div style="flex: 0 0 auto;">
         <button id="searchBtn" onclick="searchAndAddPoi()">🔍 Suchen & Hinzufügen</button>
@@ -82,13 +92,13 @@
     <div id="geoStatus" class="status-msg"></div>
   </div>
 
-  <!-- 4. Aktuelle POI-Liste -->
+  <!-- 4. Liste -->
   <div class="card">
     <h3>Orte der ausgewählten Stadt</h3>
     <ul id="poiList"></ul>
   </div>
 
-  <!-- 5. Direkter Commit auf GitHub -->
+  <!-- 5. Commit -->
   <div class="card">
     <h3>4. Änderungen auf GitHub übertragen</h3>
     <button id="commitBtn" class="commit" onclick="commitToGitHub()">🚀 Direkt nach GitHub committen</button>
@@ -101,57 +111,93 @@
   let currentFileSha = null;
   let activeCityId = null;
 
-  // Lade gespeicherte GitHub-Konfiguration
+  // Lade gespeicherte Werte
   document.getElementById('ghOwner').value = localStorage.getItem('cityTripp_ghOwner') || '';
   document.getElementById('ghRepo').value = localStorage.getItem('cityTripp_ghRepo') || '';
+  document.getElementById('ghPath').value = localStorage.getItem('cityTripp_ghPath') || 'trips.json';
+  document.getElementById('ghBranch').value = localStorage.getItem('cityTripp_ghBranch') || 'main';
   document.getElementById('ghToken').value = localStorage.getItem('cityTripp_ghToken') || '';
 
-  function saveGitHubConfig() {
-    localStorage.setItem('cityTripp_ghOwner', document.getElementById('ghOwner').value.trim());
-    localStorage.setItem('cityTripp_ghRepo', document.getElementById('ghRepo').value.trim());
-    localStorage.setItem('cityTripp_ghToken', document.getElementById('ghToken').value.trim());
+  function cleanInputs() {
+    let owner = document.getElementById('ghOwner').value.trim();
+    let repo = document.getElementById('ghRepo').value.trim();
+    let path = document.getElementById('ghPath').value.trim() || 'trips.json';
+    let branch = document.getElementById('ghBranch').value.trim() || 'main';
+    let token = document.getElementById('ghToken').value.trim();
+
+    // Bereinige versehentlich eingefügte URLs
+    owner = owner.replace('https://github.com/', '').replace('/', '');
+    repo = repo.replace('https://github.com/', '');
+    
+    if (repo.includes('/')) {
+      const parts = repo.split('/');
+      if (!owner) owner = parts[0];
+      repo = parts[1];
+    }
+
+    document.getElementById('ghOwner').value = owner;
+    document.getElementById('ghRepo').value = repo;
+    document.getElementById('ghPath').value = path;
+    document.getElementById('ghBranch').value = branch;
+
+    return { owner, repo, path, branch, token };
+  }
+
+  function saveAndLoad() {
+    const cfg = cleanInputs();
+    localStorage.setItem('cityTripp_ghOwner', cfg.owner);
+    localStorage.setItem('cityTripp_ghRepo', cfg.repo);
+    localStorage.setItem('cityTripp_ghPath', cfg.path);
+    localStorage.setItem('cityTripp_ghBranch', cfg.branch);
+    localStorage.setItem('cityTripp_ghToken', cfg.token);
     fetchTripsFromGitHub();
   }
 
+  function getAuthHeaders(token) {
+    const headers = { 'Accept': 'application/vnd.github.v3+json' };
+    if (token) {
+      // Funktioniert sowohl für github_pat_ als auch klassische Tokens
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  }
+
   async function fetchTripsFromGitHub() {
-    const owner = document.getElementById('ghOwner').value.trim();
-    const repo = document.getElementById('ghRepo').value.trim();
-    const token = document.getElementById('ghToken').value.trim();
+    const cfg = cleanInputs();
     const status = document.getElementById('ghStatus');
 
-    if (!owner || !repo) {
-      status.innerHTML = '<span class="status-error">Bitte Owner und Repo angeben.</span>';
+    if (!cfg.owner || !cfg.repo) {
+      status.innerHTML = '<span class="status-error">Bitte Benutzername und Repository-Name eingeben.</span>';
       return;
     }
 
-    status.innerHTML = '<span class="status-info">Lade trips.json von GitHub...</span>';
-    
-    const headers = { 'Accept': 'application/vnd.github.v3+json' };
-    if (token) headers['Authorization'] = `token ${token}`;
+    status.innerHTML = `<span class="status-info">Lade ${cfg.path} von ${cfg.owner}/${cfg.repo} (${cfg.branch})...</span>`;
 
     try {
-      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/trips.json?ref=main&t=${Date.now()}`, { headers });
+      const url = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${cfg.path}?ref=${cfg.branch}&t=${Date.now()}`;
+      const res = await fetch(url, { headers: getAuthHeaders(cfg.token) });
+
       if (res.status === 404) {
-        status.innerHTML = '<span class="status-info">trips.json existiert noch nicht im Repo. Erstelle neue Vorlage.</span>';
-        tripsData = { cities: [{ id: "beispiel", name: "Beispielstadt", pois: [] }] };
+        status.innerHTML = '<span class="status-info">Datei existiert noch nicht im Repo. Erstelle leere Vorlage.</span>';
+        tripsData = { cities: [{ id: "cork", name: "Cork", pois: [] }] };
         currentFileSha = null;
       } else if (res.ok) {
-        const jsonResponse = await res.json();
-        currentFileSha = jsonResponse.sha;
-        const decodedContent = decodeURIComponent(escape(atob(jsonResponse.content)));
-        tripsData = JSON.parse(decodedContent);
-        status.innerHTML = '<span class="status-success">✓ trips.json erfolgreich von GitHub geladen.</span>';
+        const data = await res.json();
+        currentFileSha = data.sha;
+        const rawContent = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ''))));
+        tripsData = JSON.parse(rawContent);
+        status.innerHTML = `<span class="status-success">✓ ${cfg.path} erfolgreich von GitHub geladen.</span>`;
       } else {
-        throw new Error(`HTTP ${res.status}`);
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `HTTP Fehler ${res.status}`);
       }
       activeCityId = tripsData.cities[0] ? tripsData.cities[0].id : null;
       render();
     } catch (err) {
-      status.innerHTML = `<span class="status-error">Fehler beim Laden: ${err.message}</span>`;
+      status.innerHTML = `<span class="status-error">Fehler: ${err.message}</span>`;
     }
   }
 
-  // Automatisches Geocoding via Nominatim
   async function searchAndAddPoi() {
     const activeCity = tripsData.cities.find(c => c.id === activeCityId);
     if (!activeCity) { alert("Bitte zuerst eine Stadt auswählen."); return; }
@@ -172,7 +218,7 @@
       const results = await res.json();
 
       if (!results || results.length === 0) {
-        geoStatus.innerHTML = `<span class="status-error">Keine Koordinaten gefunden. Bitte Namen präzisieren.</span>`;
+        geoStatus.innerHTML = `<span class="status-error">Keine Koordinaten gefunden. Bitte Namen genauer angeben.</span>`;
         btn.disabled = false;
         return;
       }
@@ -197,56 +243,52 @@
     }
   }
 
-  // Direkter GitHub Commit
   async function commitToGitHub() {
-    const owner = document.getElementById('ghOwner').value.trim();
-    const repo = document.getElementById('ghRepo').value.trim();
-    const token = document.getElementById('ghToken').value.trim();
+    const cfg = cleanInputs();
     const status = document.getElementById('commitStatus');
     const btn = document.getElementById('commitBtn');
 
-    if (!token) {
-      alert("Ein GitHub Personal Access Token ist für direkte Commits erforderlich.");
+    if (!cfg.token) {
+      alert("Bitte tragen Sie unter Punkt 1 Ihr GitHub Personal Access Token (PAT) ein.");
       return;
     }
 
     btn.disabled = true;
-    status.innerHTML = '<span class="status-info">Commite trips.json nach GitHub...</span>';
+    status.innerHTML = '<span class="status-info">Sende Commit an GitHub...</span>';
 
     try {
-      // 1. Frischen SHA holen
-      const getRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/trips.json?ref=main&t=${Date.now()}`, {
-        headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }
-      });
+      // 1. Neuesten SHA abfragen
+      const getUrl = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${cfg.path}?ref=${cfg.branch}&t=${Date.now()}`;
+      const getRes = await fetch(getUrl, { headers: getAuthHeaders(cfg.token) });
       if (getRes.ok) {
         const fileInfo = await getRes.json();
         currentFileSha = fileInfo.sha;
       }
 
-      // 2. Base64 UTF-8 Encode
+      // 2. Base64 UTF-8 Encodierung
       const jsonStr = JSON.stringify(tripsData, null, 2);
       const encodedContent = btoa(unescape(encodeURIComponent(jsonStr)));
 
-      // 3. PUT Commit
+      // 3. PUT Request
       const bodyPayload = {
-        message: `Update trips.json via CityTripp Admin [${new Date().toLocaleTimeString()}]`,
+        message: `Update ${cfg.path} via CityTripp Admin [${new Date().toLocaleTimeString()}]`,
         content: encodedContent,
-        branch: "main"
+        branch: cfg.branch
       };
       if (currentFileSha) bodyPayload.sha = currentFileSha;
 
-      const putRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/trips.json`, {
+      const putUrl = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${cfg.path}`;
+      const putRes = await fetch(putUrl, {
         method: 'PUT',
         headers: {
-          'Authorization': `token ${token}`,
-          'Accept': 'application/vnd.github.v3+json',
+          ...getAuthHeaders(cfg.token),
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(bodyPayload)
       });
 
       if (!putRes.ok) {
-        const errData = await putRes.json();
+        const errData = await putRes.json().catch(() => ({}));
         throw new Error(errData.message || `HTTP ${putRes.status}`);
       }
 
@@ -319,6 +361,7 @@
     }
   }
 
+  // Automatischer Start bei gespeicherten Daten
   if (document.getElementById('ghOwner').value && document.getElementById('ghRepo').value) {
     fetchTripsFromGitHub();
   }

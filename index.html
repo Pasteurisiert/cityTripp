@@ -239,7 +239,7 @@
     const unvisited = city.pois.filter(p => !p.visited);
     const container = document.getElementById('suggestion-content');
 
-    if (unvisited.length === 0) {
+    if (!unvisited || unvisited.length === 0) {
       container.innerHTML = "🎉 Alle Sehenswürdigkeiten in dieser Stadt besucht!";
       return;
     }
@@ -260,17 +260,41 @@
       }
     }
 
-    const gmapsLink = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${nearest.lat},${nearest.lng}&travelmode=walking`;
+    // 1. Link nur zum nächsten Halt
+    const singleNavUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${plannedNext.lat},${plannedNext.lng}&travelmode=walking`;
 
-    let html = `<p><strong>Geplant:</strong> ${plannedNext.name} (${distPlanned.distance} m, ~<strong>${distPlanned.duration} Min.</strong> Gehzeit)</p>`;
+    // 2. Link für die GESAMTE Restroute (Multi-Stop mit Waypoints)
+    let fullRouteUrl = "";
+    if (unvisited.length === 1) {
+      fullRouteUrl = singleNavUrl;
+    } else {
+      // Google Maps erlaubt max. 9 Zwischenstopps/Destination
+      const routeSlice = unvisited.slice(0, 9);
+      const destination = routeSlice[routeSlice.length - 1];
+      const waypoints = routeSlice.slice(0, routeSlice.length - 1)
+        .map(p => `${p.lat},${p.lng}`)
+        .join('%7C'); // URL-encoded |
+
+      fullRouteUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${destination.lat},${destination.lng}&waypoints=${waypoints}&travelmode=walking`;
+    }
+
+    let html = `<p><strong>Geplant als Nächstes:</strong> ${plannedNext.name} (${distPlanned.distance} m, ~${distPlanned.duration} Min.)</p>`;
+    
     if (plannedNext.id !== nearest.id) {
-      html += `<p style="color: #d9534f;"><strong>Kürzerer Weg:</strong> ${nearest.name} (${nearestInfo.distance} m, ~<strong>${nearestInfo.duration} Min.</strong> Gehzeit)</p>
+      html += `<p style="color: #d9534f;"><strong>Kürzerer Fußweg ab hier:</strong> ${nearest.name} (${nearestInfo.distance} m, ~${nearestInfo.duration} Min.)</p>
                <button onclick="setNext(${nearest.id})">Zu ${nearest.name} wechseln</button>`;
     }
-    html += `<div style="margin-top: 10px;"><a class="nav-btn" href="${gmapsLink}" target="_blank">🗺 In Google Maps navigieren</a></div>`;
+
+    html += `
+      <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <a class="nav-btn" href="${singleNavUrl}" target="_blank">🚶 Nur zum nächsten Halt navigieren</a>
+        <a class="nav-btn" style="background:#007aff;" href="${fullRouteUrl}" target="_blank">🗺 Gesamte Restroute (${unvisited.length} Orte) in Google Maps anzeigen</a>
+      </div>
+    `;
 
     container.innerHTML = html;
   }
+
 
   function markVisited(id) {
     const city = getActiveCity();

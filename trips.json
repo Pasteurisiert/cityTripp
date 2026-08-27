@@ -130,6 +130,74 @@
           "visited": false
         }
       ]
+    },
+    {
+      "id": "belfast",
+      "name": "Belfast",
+      "pois": [
+        {
+          "id": 1787854608910,
+          "name": "Titanic Quarter",
+          "lat": 54.6050496,
+          "lng": -5.9108762,
+          "visited": false
+        },
+        {
+          "id": 1787854615938,
+          "name": "SS Nomadic",
+          "lat": 54.6064002,
+          "lng": -5.9110773,
+          "visited": false
+        },
+        {
+          "id": 1787854635461,
+          "name": "Saint George's Market",
+          "lat": 54.5958866,
+          "lng": -5.922018,
+          "visited": false
+        },
+        {
+          "id": 1787854644531,
+          "name": "Grand Opera House",
+          "lat": 54.5953336,
+          "lng": -5.9351922,
+          "visited": false
+        },
+        {
+          "id": 1787854656842,
+          "name": "Belfast City Hall Grounds",
+          "lat": 54.5966198,
+          "lng": -5.9310104,
+          "visited": false
+        },
+        {
+          "id": 1787854667045,
+          "name": "Albert Memorial Clock",
+          "lat": 54.6008615,
+          "lng": -5.9243697,
+          "visited": false
+        },
+        {
+          "id": 1787854675743,
+          "name": "The Big Fish",
+          "lat": 54.601462,
+          "lng": -5.9216737,
+          "visited": false
+        }
+      ]
+    },
+    {
+      "id": "glasgow",
+      "name": "Glasgow",
+      "pois": [
+        {
+          "id": 1787854716838,
+          "name": "George Square",
+          "lat": 55.8611567,
+          "lng": -4.2502189,
+          "visited": false
+        }
+      ]
     }
   ]
 }

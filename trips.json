@@ -1,0 +1,71 @@
+{
+  "cities": [
+    {
+      "id": "beispiel",
+      "name": "Beispielstadt",
+      "pois": []
+    },
+    {
+      "id": "cork",
+      "name": "Cork",
+      "pois": [
+        {
+          "id": 1787845953605,
+          "name": "St. Patrick's Quay",
+          "lat": 51.9006504,
+          "lng": -8.4663088,
+          "visited": false
+        },
+        {
+          "id": 1787845964866,
+          "name": "Holy Trinity",
+          "lat": 51.8958413,
+          "lng": -8.4708106,
+          "visited": false
+        },
+        {
+          "id": 1787845980613,
+          "name": "Elizabeth Fort",
+          "lat": 51.8945487,
+          "lng": -8.4779579,
+          "visited": false
+        },
+        {
+          "id": 1787845988739,
+          "name": "Saint Fin Barre's Cathedral",
+          "lat": 51.8943556,
+          "lng": -8.4804996,
+          "visited": false
+        },
+        {
+          "id": 1787845995555,
+          "name": "Bishop Lucey Park",
+          "lat": 51.8971483,
+          "lng": -8.4763778,
+          "visited": false
+        },
+        {
+          "id": 1787846002872,
+          "name": "Crawford Art Gallery",
+          "lat": 51.8998551,
+          "lng": -8.4732899,
+          "visited": false
+        },
+        {
+          "id": 1787846011123,
+          "name": "St. Patrick's Street",
+          "lat": 51.8983321,
+          "lng": -8.472843,
+          "visited": false
+        },
+        {
+          "id": 1787846019938,
+          "name": "Oliver Plunkett Street",
+          "lat": 51.8983095,
+          "lng": -8.4688844,
+          "visited": false
+        }
+      ]
+    }
+  ]
+}

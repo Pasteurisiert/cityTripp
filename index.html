@@ -194,29 +194,58 @@
     return Math.round(dx + dy);
   }
 
-  async function getFootDistance(p1, p2) {
-    if (!p1 || !p2) return { distance: 0, duration: 0, type: "N/A" };
-    const key = `${p1.lat.toFixed(5)},${p1.lng.toFixed(5)}_${p2.lat.toFixed(5)},${p2.lng.toFixed(5)}`;
-    if (distanceCache[key] !== undefined) return distanceCache[key];
-
-    const url = `https://router.project-osrm.org/route/v1/foot/${p1.lng},${p1.lat};${p2.lng},${p2.lat}?overview=false`;
-    try {
-      const response = await fetch(url);
-      const res = await response.json();
-      if (res.code === 'Ok' && res.routes && res.routes.length > 0) {
-        const meters = Math.round(res.routes[0].distance);
-        const durationMin = Math.round(res.routes[0].duration / 60);
-        const result = { distance: meters, duration: durationMin, type: "Fußweg" };
-        distanceCache[key] = result;
-        return result;
+    async function getFootDistance(p1, p2) {
+      if (!p1 || !p2) return { distance: 0, duration: 0, type: "N/A" };
+      
+      // Gleicher Punkt
+      if (Math.abs(p1.lat - p2.lat) < 0.00001 && Math.abs(p1.lng - p2.lng) < 0.00001) {
+        return { distance: 0, duration: 0, type: "Fußweg" };
       }
-    } catch (e) {}
+  
+      const key = `${p1.lat.toFixed(5)},${p1.lng.toFixed(5)}_${p2.lat.toFixed(5)},${p2.lng.toFixed(5)}`;
+      if (distanceCache[key] !== undefined) return distanceCache[key];
+  
+      // Fallback: Manhattan-/Luftlinie-Näherung berechnen
+      const manhattan = getManhattanDistance(p1.lat, p1.lng, p2.lat, p2.lng);
+      const fallback = { 
+        distance: manhattan, 
+        duration: Math.max(1, Math.round(manhattan / 80)), 
+        type: "Näherung" 
+      };
+  
+      // Timeout nach 1,8 Sekunden einbauen, damit die App niemals einfriert
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1800);
+  
+      const url = `https://router.project-osrm.org/route/v1/foot/${p1.lng},${p1.lat};${p2.lng},${p2.lat}?overview=false`;
+  
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          // Bei HTTP 429 (Rate Limit) oder anderen Serverfehlern sofort Fallback nutzen
+          distanceCache[key] = fallback;
+          return fallback;
+        }
+  
+        const res = await response.json();
+        if (res.code === 'Ok' && res.routes && res.routes.length > 0) {
+          const meters = Math.round(res.routes[0].distance);
+          const durationMin = Math.max(1, Math.round(res.routes[0].duration / 60));
+          const result = { distance: meters, duration: durationMin, type: "Fußweg" };
+          distanceCache[key] = result;
+          return result;
+        }
+      } catch (e) {
+        // Bei Netzwerkfehler oder Timeout (AbortError) greift der Fallback
+        clearTimeout(timeoutId);
+      }
+  
+      distanceCache[key] = fallback;
+      return fallback;
+    }
 
-    const manhattan = getManhattanDistance(p1.lat, p1.lng, p2.lat, p2.lng);
-    const fallback = { distance: manhattan, duration: Math.round(manhattan / 80), type: "Manhattan" };
-    distanceCache[key] = fallback;
-    return fallback;
-  }
 
   async function calculateTotalPathWithEnd(origin, route, endTarget) {
     let totalDist = 0;

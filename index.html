@@ -14,15 +14,19 @@
     button.secondary { background: #e5e5ea; color: #1c1c1e; }
     button.success { background: #34c759; }
     button.small { padding: 4px 8px; font-size: 12px; }
+    button.danger-small { background: #ff3b30; color: white; padding: 4px 8px; font-size: 12px; }
     ul { list-style: none; padding: 0; margin: 0; }
     li { padding: 12px 0; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
-    li.start-endpoint { background: #f0f7ff; border-radius: 8px; padding: 10px 12px; margin-top: 8px; border: 1px dashed #007aff; }
+    li.start-endpoint { background: #f0f7ff; border-radius: 8px; padding: 12px; margin-top: 10px; border: 1.5px solid #007aff; }
+    li.start-endpoint.disabled { background: #f8f8f8; border: 1.5px dashed #c7c7cc; opacity: 0.7; }
     .visited { text-decoration: line-through; color: #8e8e93; }
-    .badge { font-size: 12px; padding: 3px 8px; border-radius: 6px; background: #e5f1ff; color: #007aff; font-weight: 500; }
+    .badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #007aff; color: white; font-weight: 600; margin-left: 6px; }
+    .badge-disabled { background: #8e8e93; color: white; }
     .nav-btn { text-decoration: none; display: inline-block; padding: 10px 14px; background: #5856d6; color: white; border-radius: 8px; font-size: 14px; font-weight: 600; text-align: center; }
     .metric-info { font-size: 12px; color: #666; margin-top: 4px; }
     .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
     a.admin-link { color: #007aff; text-decoration: none; font-size: 14px; font-weight: 600; }
+    .action-group { display: flex; gap: 4px; align-items: center; }
   </style>
 </head>
 <body>
@@ -39,7 +43,7 @@
     <div>
       <button onclick="updatePosition()">📍 GPS aktualisieren</button>
       <button onclick="setStartPointHere()">🏨 Hier als Start/Ziel merken</button>
-      <button class="secondary" onclick="optimizeRemainingRoute()">⚡ Rundtour optimieren (TSP)</button>
+      <button class="secondary" onclick="optimizeRemainingRoute()">⚡ Route optimieren (TSP)</button>
     </div>
     <div id="status" style="margin-top: 8px; font-size: 13px; color: #555;">Standort: Initialisiere...</div>
   </div>
@@ -62,7 +66,7 @@
   let data = null;
   let activeCityId = null;
   let currentPos = null;
-  let startPoint = null;
+  let startPoint = null; // { name, lat, lng, enabled: true/false }
   let distanceCache = {};
 
   async function loadFromGitHub() {
@@ -86,7 +90,20 @@
 
   function loadStartPointForCity() {
     const saved = localStorage.getItem(`cityTripp_startPoint_${activeCityId}`);
-    startPoint = saved ? JSON.parse(saved) : null;
+    if (saved) {
+      startPoint = JSON.parse(saved);
+      if (startPoint.enabled === undefined) startPoint.enabled = true;
+    } else {
+      startPoint = null;
+    }
+  }
+
+  function saveStartPoint() {
+    if (startPoint) {
+      localStorage.setItem(`cityTripp_startPoint_${activeCityId}`, JSON.stringify(startPoint));
+    } else {
+      localStorage.removeItem(`cityTripp_startPoint_${activeCityId}`);
+    }
   }
 
   function setStartPointHere() {
@@ -97,15 +114,23 @@
     const name = prompt("Name für Ausgangs-/Rückkehrpunkt (z. B. Mein Hotel, Bahnhof):", "Mein Hotel / Ausgangspunkt");
     if (!name) return;
 
-    startPoint = { name: name, lat: currentPos.lat, lng: currentPos.lng };
-    localStorage.setItem(`cityTripp_startPoint_${activeCityId}`, JSON.stringify(startPoint));
-    document.getElementById('status').innerText = `Ausgangspunkt gesetzt: "${name}"`;
+    startPoint = { name: name, lat: currentPos.lat, lng: currentPos.lng, enabled: true };
+    saveStartPoint();
+    document.getElementById('status').innerText = `Ausgangspunkt gesetzt: "${name}" (Aktiv)`;
     render();
+  }
+
+  function toggleStartPoint() {
+    if (startPoint) {
+      startPoint.enabled = !startPoint.enabled;
+      saveStartPoint();
+      render();
+    }
   }
 
   function clearStartPoint() {
     startPoint = null;
-    localStorage.removeItem(`cityTripp_startPoint_${activeCityId}`);
+    saveStartPoint();
     render();
   }
 
@@ -168,7 +193,7 @@
     return fallback;
   }
 
-  async function calculateTotalPathWithEnd(origin, route, end) {
+  async function calculateTotalPathWithEnd(origin, route, endTarget) {
     let totalDist = 0;
     let totalDur = 0;
     let curr = origin;
@@ -180,10 +205,11 @@
       curr = point;
     }
 
-    const returnPoint = end || origin;
-    const returnMetric = await getFootDistance(curr, returnPoint);
-    totalDist += returnMetric.distance;
-    totalDur += returnMetric.duration;
+    if (endTarget) {
+      const returnMetric = await getFootDistance(curr, endTarget);
+      totalDist += returnMetric.distance;
+      totalDur += returnMetric.duration;
+    }
 
     return { totalDist, totalDur };
   }
@@ -195,10 +221,15 @@
 
     if (unvisited.length === 0) return;
 
-    document.getElementById('status').innerText = "Berechne optimale Rundtour inklusive Rückweg...";
+    // Rückkehrziel nur verwenden, wenn startPoint existiert und aktiviert ist
+    const returnTarget = (startPoint && startPoint.enabled) ? startPoint : null;
 
-    const returnTarget = startPoint || currentPos;
-    const allPoints = [currentPos, ...unvisited, returnTarget];
+    document.getElementById('status').innerText = returnTarget 
+      ? "Berechne optimale Rundtour inklusive Rückweg..." 
+      : "Berechne optimale Einweg-Route...";
+
+    const allPoints = [currentPos, ...unvisited];
+    if (returnTarget) allPoints.push(returnTarget);
 
     const prefetch = [];
     for (let i = 0; i < allPoints.length; i++) {
@@ -250,9 +281,9 @@
     city.pois = [...visited, ...bestOrder];
     const metrics = await calculateTotalPathWithEnd(currentPos, bestOrder, returnTarget);
     
-    const endName = startPoint ? `"${startPoint.name}"` : "Ausgangspunkt";
-    document.getElementById('status').innerText = 
-      `Rundtour optimiert! Gesamtweg: ${(metrics.totalDist / 1000).toFixed(2)} km (~${metrics.totalDur} Min.) inkl. Rückweg zu ${endName}`;
+    let info = `Route optimiert! Gesamtweg: ${(metrics.totalDist / 1000).toFixed(2)} km (~${metrics.totalDur} Min.)`;
+    if (returnTarget) info += ` inkl. Rückkehr zu "${returnTarget.name}"`;
+    document.getElementById('status').innerText = info;
 
     render();
   }
@@ -293,18 +324,27 @@
       list.appendChild(li);
     });
 
-    const returnPoint = startPoint || { name: "Aktueller Standort (Rundkurs)", lat: currentPos.lat, lng: currentPos.lng };
-    const endDist = await getFootDistance(currentPos, returnPoint);
-    const endLi = document.createElement('li');
-    endLi.className = 'start-endpoint';
-    endLi.innerHTML = `
-      <div>
-        <strong>🏁 Ziel / Rückkehr: ${returnPoint.name}</strong>
-        <div class="metric-info">${endDist.distance} m direkte Fußdistanz ab hier (~${endDist.duration} Min.)</div>
-      </div>
-      ${startPoint ? `<button class="secondary small" onclick="clearStartPoint()">Entfernen</button>` : ''}
-    `;
-    list.appendChild(endLi);
+    // Start- und Endpunkt als an-/abwählbares Element in der Liste
+    if (startPoint) {
+      const isEnabled = startPoint.enabled !== false;
+      const endDist = await getFootDistance(currentPos, startPoint);
+      const endLi = document.createElement('li');
+      endLi.className = `start-endpoint ${isEnabled ? '' : 'disabled'}`;
+      endLi.innerHTML = `
+        <div>
+          <strong>🏁 Ziel / Rückkehr: ${startPoint.name}</strong>
+          <span class="badge ${isEnabled ? '' : 'badge-disabled'}">${isEnabled ? 'Aktiviert' : 'Deaktiviert'}</span>
+          <div class="metric-info">${endDist.distance} m ab aktuellem GPS (~${endDist.duration} Min.)</div>
+        </div>
+        <div class="action-group">
+          <button class="secondary small" onclick="toggleStartPoint()">
+            ${isEnabled ? '⏸ Abwählen' : '▶ Anwählen'}
+          </button>
+          <button class="danger-small" onclick="clearStartPoint()">✕</button>
+        </div>
+      `;
+      list.appendChild(endLi);
+    }
 
     await updateSuggestions();
   }
@@ -313,18 +353,20 @@
     const city = getActiveCity();
     const unvisited = city.pois.filter(p => !p.visited);
     const container = document.getElementById('suggestion-content');
-
-    const returnTarget = startPoint || currentPos;
-    const returnName = startPoint ? startPoint.name : "Ausgangsort";
+    const isReturnActive = startPoint && startPoint.enabled;
 
     if (unvisited.length === 0) {
-      const dHome = await getFootDistance(currentPos, returnTarget);
-      const homeUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${returnTarget.lat},${returnTarget.lng}&travelmode=walking`;
-      container.innerHTML = `
-        <p>🎉 Alle Orte besucht!</p>
-        <p><strong>Rückweg zum Ziel:</strong> ${returnName} (${dHome.distance} m, ~${dHome.duration} Min.)</p>
-        <a class="nav-btn" href="${homeUrl}" target="_blank">🏨 Zurück zu ${returnName} navigieren</a>
-      `;
+      if (isReturnActive) {
+        const dHome = await getFootDistance(currentPos, startPoint);
+        const homeUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${startPoint.lat},${startPoint.lng}&travelmode=walking`;
+        container.innerHTML = `
+          <p>🎉 Alle Orte besucht!</p>
+          <p><strong>Rückweg zum Ziel:</strong> ${startPoint.name} (${dHome.distance} m, ~${dHome.duration} Min.)</p>
+          <a class="nav-btn" href="${homeUrl}" target="_blank">🏨 Zurück zu ${startPoint.name} navigieren</a>
+        `;
+      } else {
+        container.innerHTML = "🎉 Alle Sehenswürdigkeiten in dieser Stadt besucht!";
+      }
       return;
     }
 
@@ -346,11 +388,24 @@
 
     const singleNavUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${plannedNext.lat},${plannedNext.lng}&travelmode=walking`;
 
-    // Google Maps Multi-Stop: Start -> Stopps -> Zurück zum Ausgangspunkt
-    const maxWaypoints = unvisited.slice(0, 8); // Max. 8 Zwischenstationen + 1 Endziel (Google Maps Limit = 10 Punkte)
-    const waypointsParam = maxWaypoints.map(p => `${p.lat},${p.lng}`).join('%7C');
-    
-    const fullRoundTripUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${returnTarget.lat},${returnTarget.lng}&waypoints=${waypointsParam}&travelmode=walking`;
+    // Multi-Stop Route für Google Maps generieren
+    let fullRouteUrl = "";
+    const routeStops = [...unvisited];
+    if (isReturnActive) {
+      routeStops.push(startPoint);
+    }
+
+    if (routeStops.length === 1) {
+      fullRouteUrl = singleNavUrl;
+    } else {
+      const routeSlice = routeStops.slice(0, 9);
+      const destination = routeSlice[routeSlice.length - 1];
+      const waypoints = routeSlice.slice(0, routeSlice.length - 1)
+        .map(p => `${p.lat},${p.lng}`)
+        .join('%7C');
+
+      fullRouteUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${destination.lat},${destination.lng}&waypoints=${waypoints}&travelmode=walking`;
+    }
 
     let html = `<p><strong>Geplant als Nächstes:</strong> ${plannedNext.name} (${distPlanned.distance} m, ~${distPlanned.duration} Min.)</p>`;
     
@@ -359,10 +414,14 @@
                <button onclick="setNext(${nearest.id})">Zu ${nearest.name} wechseln</button>`;
     }
 
+    const buttonLabel = isReturnActive 
+      ? `🔄 Gesamte Rundtour (inkl. ${startPoint.name}) in Google Maps öffnen`
+      : `🗺 Gesamte Restroute (${unvisited.length} Stationen) in Google Maps öffnen`;
+
     html += `
       <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
         <a class="nav-btn" href="${singleNavUrl}" target="_blank">🚶 Nur zum nächsten Halt navigieren</a>
-        <a class="nav-btn" style="background:#007aff;" href="${fullRoundTripUrl}" target="_blank">🔄 Gesamte Rundtour in Google Maps öffnen (inkl. Rückkehr)</a>
+        <a class="nav-btn" style="background:#007aff;" href="${fullRouteUrl}" target="_blank">${buttonLabel}</a>
       </div>
     `;
 

@@ -59,6 +59,13 @@
           "lat": 51.8983095,
           "lng": -8.4688844,
           "visited": false
+        },
+        {
+          "id": 1787999309951,
+          "name": "The English Market",
+          "lat": 51.8978042,
+          "lng": -8.4739628,
+          "visited": false
         }
       ]
     },

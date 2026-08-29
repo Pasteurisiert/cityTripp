@@ -317,6 +317,19 @@
           "visited": false
         }
       ]
+    },
+    {
+      "id": "kirkwall",
+      "name": "Kirkwall",
+      "pois": [
+        {
+          "id": 1788007977837,
+          "name": "St Magnus Cathedral",
+          "lat": 58.9814199,
+          "lng": -2.9596116,
+          "visited": false
+        }
+      ]
     }
   ]
 }

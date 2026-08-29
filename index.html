@@ -46,7 +46,7 @@
     
     <div>
       <button onclick="updatePosition()">📍 GPS aktualisieren</button>
-      <button onclick="setStartPointHere()">🏨 Hier als Start/Ziel merken</button>
+      <button onclick="setStartPointHere()">🏨 Hier als Rückkehrziel merken</button>
       <button class="secondary" onclick="optimizeRemainingRoute()">⚡ Route optimieren (TSP)</button>
     </div>
     <div id="status" style="margin-top: 8px; font-size: 13px; color: #555;">Standort: Initialisiere...</div>
@@ -71,7 +71,7 @@
   let activeCityId = null;
   let currentPos = null;
   let currentPosEnabled = true; // Toggle für aktuellen GPS-Startpunkt
-  let startPoint = null; // Fester gemerkter Ausgangs-/Endpunkt
+  let startPoint = null;        // Fester Ausgangs-/Endpunkt (Hotel, Bahnhof)
   let distanceCache = {};
 
   async function loadFromGitHub() {
@@ -122,7 +122,7 @@
       alert("GPS-Position noch nicht erfasst. Bitte kurz warten oder GPS aktivieren.");
       return;
     }
-    const name = prompt("Name für Ausgangs-/Rückkehrpunkt (z. B. Hotel, Bahnhof):", "Mein Hotel / Ausgangspunkt");
+    const name = prompt("Name für Rückkehrpunkt (z. B. Hotel, Bahnhof):", "Mein Hotel / Ausgangspunkt");
     if (!name) return;
 
     startPoint = { name: name, lat: currentPos.lat, lng: currentPos.lng, enabled: true };
@@ -194,58 +194,51 @@
     return Math.round(dx + dy);
   }
 
-    async function getFootDistance(p1, p2) {
-      if (!p1 || !p2) return { distance: 0, duration: 0, type: "N/A" };
-      
-      // Gleicher Punkt
-      if (Math.abs(p1.lat - p2.lat) < 0.00001 && Math.abs(p1.lng - p2.lng) < 0.00001) {
-        return { distance: 0, duration: 0, type: "Fußweg" };
-      }
-  
-      const key = `${p1.lat.toFixed(5)},${p1.lng.toFixed(5)}_${p2.lat.toFixed(5)},${p2.lng.toFixed(5)}`;
-      if (distanceCache[key] !== undefined) return distanceCache[key];
-  
-      // Fallback: Manhattan-/Luftlinie-Näherung berechnen
-      const manhattan = getManhattanDistance(p1.lat, p1.lng, p2.lat, p2.lng);
-      const fallback = { 
-        distance: manhattan, 
-        duration: Math.max(1, Math.round(manhattan / 80)), 
-        type: "Näherung" 
-      };
-  
-      // Timeout nach 1,8 Sekunden einbauen, damit die App niemals einfriert
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 1800);
-  
-      const url = `https://router.project-osrm.org/route/v1/foot/${p1.lng},${p1.lat};${p2.lng},${p2.lat}?overview=false`;
-  
-      try {
-        const response = await fetch(url, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-          // Bei HTTP 429 (Rate Limit) oder anderen Serverfehlern sofort Fallback nutzen
-          distanceCache[key] = fallback;
-          return fallback;
-        }
-  
-        const res = await response.json();
-        if (res.code === 'Ok' && res.routes && res.routes.length > 0) {
-          const meters = Math.round(res.routes[0].distance);
-          const durationMin = Math.max(1, Math.round(res.routes[0].duration / 60));
-          const result = { distance: meters, duration: durationMin, type: "Fußweg" };
-          distanceCache[key] = result;
-          return result;
-        }
-      } catch (e) {
-        // Bei Netzwerkfehler oder Timeout (AbortError) greift der Fallback
-        clearTimeout(timeoutId);
-      }
-  
-      distanceCache[key] = fallback;
-      return fallback;
+  async function getFootDistance(p1, p2) {
+    if (!p1 || !p2) return { distance: 0, duration: 0, type: "N/A" };
+
+    if (Math.abs(p1.lat - p2.lat) < 0.00001 && Math.abs(p1.lng - p2.lng) < 0.00001) {
+      return { distance: 0, duration: 0, type: "Fußweg" };
     }
 
+    const key = `${p1.lat.toFixed(5)},${p1.lng.toFixed(5)}_${p2.lat.toFixed(5)},${p2.lng.toFixed(5)}`;
+    if (distanceCache[key] !== undefined) return distanceCache[key];
+
+    const manhattan = getManhattanDistance(p1.lat, p1.lng, p2.lat, p2.lng);
+    const fallback = { 
+      distance: manhattan, 
+      duration: Math.max(1, Math.round(manhattan / 80)), 
+      type: "Näherung" 
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1800);
+    const url = `https://router.project-osrm.org/route/v1/foot/${p1.lng},${p1.lat};${p2.lng},${p2.lat}?overview=false`;
+
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        distanceCache[key] = fallback;
+        return fallback;
+      }
+
+      const res = await response.json();
+      if (res.code === 'Ok' && res.routes && res.routes.length > 0) {
+        const meters = Math.round(res.routes[0].distance);
+        const durationMin = Math.max(1, Math.round(res.routes[0].duration / 60));
+        const result = { distance: meters, duration: durationMin, type: "Fußweg" };
+        distanceCache[key] = result;
+        return result;
+      }
+    } catch (e) {
+      clearTimeout(timeoutId);
+    }
+
+    distanceCache[key] = fallback;
+    return fallback;
+  }
 
   async function calculateTotalPathWithEnd(origin, route, endTarget) {
     let totalDist = 0;
@@ -280,7 +273,6 @@
       return;
     }
 
-    // Startet die Route am aktuellen GPS-Ort oder direkt beim ersten POI?
     const startOrigin = currentPosEnabled ? currentPos : null;
     const returnTarget = (startPoint && startPoint.enabled !== false) ? startPoint : null;
 
@@ -433,7 +425,7 @@
           <strong>🏁 Ziel / Rückkehr: ${startPoint.name}</strong>
           <span class="badge ${isEnabled ? '' : 'badge-disabled'}">${isEnabled ? 'Aktiv' : 'Pausiert'}</span>
           <div class="metric-info">
-            ${isEnabled ? `${endDist.distance} m direkte Distanz ab GPS (~${endDist.duration} Min.)` : '<em>Rückkehr nicht in Route</em>'}
+            ${isEnabled ? `${endDist.distance} m ab aktuellem GPS (~${endDist.duration} Min.)` : '<em>Rückkehr nicht in Route</em>'}
           </div>
         </div>
         <div class="action-group">
@@ -458,7 +450,7 @@
     if (unvisitedActive.length === 0) {
       if (isReturnActive) {
         const dHome = await getFootDistance(currentPos, startPoint);
-        const homeUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${startPoint.lat},${startPoint.lng}&travelmode=walking`;
+        const homeUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(currentPos.lat + ',' + currentPos.lng)}&destination=${encodeURIComponent(startPoint.lat + ',' + startPoint.lng)}&travelmode=walking`;
         container.innerHTML = `
           <p>🎉 Alle aktiven Stationen besucht!</p>
           <p><strong>Rückweg zum Ziel:</strong> ${startPoint.name} (${dHome.distance} m, ~${dHome.duration} Min.)</p>
@@ -486,9 +478,8 @@
       }
     }
 
-    const singleNavUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${plannedNext.lat},${plannedNext.lng}&travelmode=walking`;
+    const singleNavUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(currentPos.lat + ',' + currentPos.lng)}&destination=${encodeURIComponent(plannedNext.lat + ',' + plannedNext.lng)}&travelmode=walking`;
 
-    // Multi-Stop Route für Google Maps generieren
     let fullRouteUrl = "";
     const navOrigin = currentPosEnabled ? currentPos : unvisitedActive[0];
     const navStops = currentPosEnabled ? [...unvisitedActive] : unvisitedActive.slice(1);
@@ -500,18 +491,26 @@
     if (navStops.length === 0) {
       fullRouteUrl = singleNavUrl;
     } else {
-      // Google Maps erlaubt maximal 9-10 Wegpunkte in der URL
       const routeSlice = navStops.slice(0, 9);
       const destination = routeSlice[routeSlice.length - 1];
       const waypoints = routeSlice.slice(0, routeSlice.length - 1)
         .map(p => `${p.lat},${p.lng}`)
         .join('%7C');
 
-      // Hier wird die URL für die Gesamttour erstellt:
       fullRouteUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(navOrigin.lat + ',' + navOrigin.lng)}&destination=${encodeURIComponent(destination.lat + ',' + destination.lng)}&waypoints=${encodeURIComponent(waypoints)}&travelmode=walking`;
     }
 
-    // ⬇️ HIER WIRD DIE URL IN DEN BUTTON EINGESETZT ⬇️
+    let html = `<p><strong>Geplant als Nächstes:</strong> ${plannedNext.name} (${distPlanned.distance} m, ~${distPlanned.duration} Min.)</p>`;
+    
+    if (plannedNext.id !== nearest.id) {
+      html += `<p style="color: #d9534f;"><strong>Kürzerer Fußweg ab aktuellem Standort:</strong> ${nearest.name} (${nearestInfo.distance} m, ~${nearestInfo.duration} Min.)</p>
+               <button onclick="setNext(${nearest.id})">Zu ${nearest.name} wechseln</button>`;
+    }
+
+    const buttonLabel = isReturnActive 
+      ? `🔄 Gesamte Rundtour (inkl. Rückweg zu ${startPoint.name}) in Google Maps öffnen`
+      : `🗺 Gesamte Route (${unvisitedActive.length} Stationen) in Google Maps öffnen`;
+
     html += `
       <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
         <a class="nav-btn" href="${singleNavUrl}" target="_blank">🚶 Nur zum nächsten Halt navigieren</a>
@@ -521,7 +520,6 @@
 
     container.innerHTML = html;
   }
-
 
   function markVisited(id) {
     const city = getActiveCity();

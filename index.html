@@ -471,26 +471,18 @@
     if (navStops.length === 0) {
       fullRouteUrl = singleNavUrl;
     } else {
+      // Google Maps erlaubt maximal 9-10 Wegpunkte in der URL
       const routeSlice = navStops.slice(0, 9);
       const destination = routeSlice[routeSlice.length - 1];
       const waypoints = routeSlice.slice(0, routeSlice.length - 1)
         .map(p => `${p.lat},${p.lng}`)
         .join('%7C');
 
-      fullRouteUrl = `https://www.google.com/maps/dir/?api=1&origin=${navOrigin.lat},${navOrigin.lng}&destination=${destination.lat},${destination.lng}&waypoints=${waypoints}&travelmode=walking`;
+      // Hier wird die URL für die Gesamttour erstellt:
+      fullRouteUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(navOrigin.lat + ',' + navOrigin.lng)}&destination=${encodeURIComponent(destination.lat + ',' + destination.lng)}&waypoints=${encodeURIComponent(waypoints)}&travelmode=walking`;
     }
 
-    let html = `<p><strong>Geplant als Nächstes:</strong> ${plannedNext.name} (${distPlanned.distance} m, ~${distPlanned.duration} Min.)</p>`;
-    
-    if (plannedNext.id !== nearest.id) {
-      html += `<p style="color: #d9534f;"><strong>Kürzerer Fußweg ab aktuellem Standort:</strong> ${nearest.name} (${nearestInfo.distance} m, ~${nearestInfo.duration} Min.)</p>
-               <button onclick="setNext(${nearest.id})">Zu ${nearest.name} wechseln</button>`;
-    }
-
-    const buttonLabel = isReturnActive 
-      ? `🔄 Gesamte Rundtour (inkl. Rückweg zu ${startPoint.name}) in Google Maps öffnen`
-      : `🗺 Gesamte Route (${unvisitedActive.length} Stationen) in Google Maps öffnen`;
-
+    // ⬇️ HIER WIRD DIE URL IN DEN BUTTON EINGESETZT ⬇️
     html += `
       <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
         <a class="nav-btn" href="${singleNavUrl}" target="_blank">🚶 Nur zum nächsten Halt navigieren</a>
@@ -500,6 +492,7 @@
 
     container.innerHTML = html;
   }
+
 
   function markVisited(id) {
     const city = getActiveCity();

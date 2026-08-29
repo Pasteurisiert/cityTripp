@@ -240,206 +240,245 @@
     return fallback;
   }
 
-  async function calculateTotalPathWithEnd(origin, route, endTarget) {
-    let totalDist = 0;
-    let totalDur = 0;
-    let curr = origin;
-
-    for (let point of route) {
-      if (curr) {
-        const metric = await getFootDistance(curr, point);
-        totalDist += metric.distance;
-        totalDur += metric.duration;
+    // 1. Berechnung der Gesamtmetriken entlang der Kette (Start -> P1 -> P2 -> ... -> Pn -> Ziel)
+    async function calculateTotalPathWithEnd(origin, route, endTarget) {
+      let totalDist = 0;
+      let curr = origin;
+  
+      for (let point of route) {
+        if (curr) {
+          const metric = await getFootDistance(curr, point);
+          totalDist += metric.distance;
+        }
+        curr = point;
       }
-      curr = point;
-    }
-
-    if (endTarget && curr) {
-      const returnMetric = await getFootDistance(curr, endTarget);
-      totalDist += returnMetric.distance;
-      totalDur += returnMetric.duration;
-    }
-
-    return { totalDist, totalDur };
-  }
-
-  async function optimizeRemainingRoute() {
-    const city = getActiveCity();
-    const activeUnvisited = city.pois.filter(p => !p.visited && p.enabled !== false);
-    const inactiveOrVisited = city.pois.filter(p => p.visited || p.enabled === false);
-
-    if (activeUnvisited.length === 0) {
-      alert("Keine aktiven, unbesuchten Stationen zum Optimieren ausgewählt.");
-      return;
-    }
-
-    const startOrigin = currentPosEnabled ? currentPos : null;
-    const returnTarget = (startPoint && startPoint.enabled !== false) ? startPoint : null;
-
-    document.getElementById('status').innerText = "Berechne globale Bestroute...";
-
-    const allPoints = [];
-    if (startOrigin) allPoints.push(startOrigin);
-    allPoints.push(...activeUnvisited);
-    if (returnTarget) allPoints.push(returnTarget);
-
-    const prefetch = [];
-    for (let i = 0; i < allPoints.length; i++) {
-      for (let j = 0; j < allPoints.length; j++) {
-        if (i !== j) prefetch.push(getFootDistance(allPoints[i], allPoints[j]));
+  
+      if (endTarget && curr) {
+        const returnMetric = await getFootDistance(curr, endTarget);
+        totalDist += returnMetric.distance;
       }
+  
+      // Realistische Gehzeit: 4.8 km/h = 80 Meter pro Minute
+      const totalDur = Math.round(totalDist / 80);
+      return { totalDist, totalDur };
     }
-    await Promise.all(prefetch);
-
-    let bestOrder = [];
-    let minTotalDistance = Infinity;
-
-    if (activeUnvisited.length <= 8) {
-      function permute(arr) {
-        if (arr.length <= 1) return [arr];
-        let result = [];
-        for (let i = 0; i < arr.length; i++) {
-          const current = arr[i];
-          const remaining = arr.slice(0, i).concat(arr.slice(i + 1));
-          for (let p of permute(remaining)) {
-            result.push([current].concat(p));
+  
+    // 2. Optimierung mit korrekter Gehzeit-Ausgabe
+    async function optimizeRemainingRoute() {
+      const city = getActiveCity();
+      const activeUnvisited = city.pois.filter(p => !p.visited && p.enabled !== false);
+      const inactiveOrVisited = city.pois.filter(p => p.visited || p.enabled === false);
+  
+      if (activeUnvisited.length === 0) {
+        alert("Keine aktiven, unbesuchten Stationen zum Optimieren ausgewählt.");
+        return;
+      }
+  
+      const startOrigin = currentPosEnabled ? currentPos : null;
+      const returnTarget = (startPoint && startPoint.enabled !== false) ? startPoint : null;
+  
+      document.getElementById('status').innerText = "Berechne globale Bestroute...";
+  
+      const allPoints = [];
+      if (startOrigin) allPoints.push(startOrigin);
+      allPoints.push(...activeUnvisited);
+      if (returnTarget) allPoints.push(returnTarget);
+  
+      const prefetch = [];
+      for (let i = 0; i < allPoints.length; i++) {
+        for (let j = 0; j < allPoints.length; j++) {
+          if (i !== j) prefetch.push(getFootDistance(allPoints[i], allPoints[j]));
+        }
+      }
+      await Promise.all(prefetch);
+  
+      let bestOrder = [];
+      let minTotalDistance = Infinity;
+  
+      if (activeUnvisited.length <= 8) {
+        function permute(arr) {
+          if (arr.length <= 1) return [arr];
+          let result = [];
+          for (let i = 0; i < arr.length; i++) {
+            const current = arr[i];
+            const remaining = arr.slice(0, i).concat(arr.slice(i + 1));
+            for (let p of permute(remaining)) {
+              result.push([current].concat(p));
+            }
+          }
+          return result;
+        }
+  
+        const allPermutations = permute(activeUnvisited);
+        for (let route of allPermutations) {
+          const origin = startOrigin || route[0];
+          const subRoute = startOrigin ? route : route.slice(1);
+          const { totalDist } = await calculateTotalPathWithEnd(origin, subRoute, returnTarget);
+          if (totalDist < minTotalDistance) {
+            minTotalDistance = totalDist;
+            bestOrder = route;
           }
         }
-        return result;
-      }
-
-      const allPermutations = permute(activeUnvisited);
-      for (let route of allPermutations) {
-        const origin = startOrigin || route[0];
-        const subRoute = startOrigin ? route : route.slice(1);
-        const { totalDist } = await calculateTotalPathWithEnd(origin, subRoute, returnTarget);
-        if (totalDist < minTotalDistance) {
-          minTotalDistance = totalDist;
-          bestOrder = route;
+      } else {
+        let pool = [...activeUnvisited];
+        let current = startOrigin || pool.shift();
+        if (!startOrigin) bestOrder.push(current);
+  
+        while (pool.length > 0) {
+          let bestI = 0, bDist = Infinity;
+          for (let i = 0; i < pool.length; i++) {
+            const d = (await getFootDistance(current, pool[i])).distance;
+            if (d < bDist) { bDist = d; bestI = i; }
+          }
+          const next = pool.splice(bestI, 1)[0];
+          bestOrder.push(next);
+          current = next;
         }
       }
-    } else {
-      let pool = [...activeUnvisited];
-      let current = startOrigin || pool.shift();
-      if (!startOrigin) bestOrder.push(current);
-
-      while (pool.length > 0) {
-        let bestI = 0, bDist = Infinity;
-        for (let i = 0; i < pool.length; i++) {
-          const d = (await getFootDistance(current, pool[i])).distance;
-          if (d < bDist) { bDist = d; bestI = i; }
-        }
-        const next = pool.splice(bestI, 1)[0];
-        bestOrder.push(next);
-        current = next;
-      }
-    }
-
-    city.pois = [...bestOrder, ...inactiveOrVisited];
-    const origin = startOrigin || bestOrder[0];
-    const subRoute = startOrigin ? bestOrder : bestOrder.slice(1);
-    const metrics = await calculateTotalPathWithEnd(origin, subRoute, returnTarget);
-    
-    let info = `Route optimiert (${bestOrder.length} Orte)! Gesamtweg: ${(metrics.totalDist / 1000).toFixed(2)} km (~${metrics.totalDur} Min.)`;
-    if (returnTarget) info += ` inkl. Rückkehr zu "${returnTarget.name}"`;
-    document.getElementById('status').innerText = info;
-
-    render();
-  }
-
-  async function render() {
-    if (!data) return;
-    populateCitySelector();
-    const city = getActiveCity();
-    const list = document.getElementById('poi-list');
-    
-    if (!city || city.pois.length === 0) {
-      list.innerHTML = '<li><em>Keine Orte in dieser Stadt eingetragen.</em></li>';
-      document.getElementById('suggestion-content').innerHTML = 'Bitte Orte im Admin-Bereich anlegen.';
-      return;
-    }
-
-    if (!currentPos) {
-      currentPos = { lat: city.pois[0].lat, lng: city.pois[0].lng };
-    }
-
-    list.innerHTML = '<li>Lade Distanzen...</li>';
-    const distances = await Promise.all(city.pois.map(p => getFootDistance(currentPos, p)));
-
-    list.innerHTML = '';
-
-    // 1. Startpunkt (Aktuelle Position) ganz oben in der Liste
-    const startLi = document.createElement('li');
-    startLi.className = `start-item ${!currentPosEnabled ? 'disabled-item' : ''}`;
-    startLi.innerHTML = `
-      <div>
-        <strong>🚀 Start: Aktuelle Position</strong>
-        <span class="badge ${currentPosEnabled ? '' : 'badge-disabled'}">${currentPosEnabled ? 'Start aktiv' : 'Pausiert'}</span>
-        <div class="metric-info">
-          GPS: ${currentPos.lat.toFixed(4)}, ${currentPos.lng.toFixed(4)}
-        </div>
-      </div>
-      <div class="action-group">
-        <button class="small ${currentPosEnabled ? 'toggle-active' : 'toggle-inactive'}" onclick="toggleCurrentPos()">
-          ${currentPosEnabled ? '👁 Aktiv' : '⏸ Pausiert'}
-        </button>
-      </div>
-    `;
-    list.appendChild(startLi);
-
-    // 2. Reguläre POIs
-    city.pois.forEach((poi, index) => {
-      const isEnabled = poi.enabled !== false;
-      const distInfo = distances[index];
-      const li = document.createElement('li');
-      li.className = `${poi.visited ? 'visited' : ''} ${!isEnabled ? 'disabled-item' : ''}`;
+  
+      city.pois = [...bestOrder, ...inactiveOrVisited];
+      const origin = startOrigin || bestOrder[0];
+      const subRoute = startOrigin ? bestOrder : bestOrder.slice(1);
+      const metrics = await calculateTotalPathWithEnd(origin, subRoute, returnTarget);
       
-      li.innerHTML = `
+      let info = `Route optimiert (${bestOrder.length} Orte)! Gesamtfußweg: ${(metrics.totalDist / 1000).toFixed(2)} km (~${metrics.totalDur} Min. Gehzeit)`;
+      if (returnTarget) info += ` inkl. Rückkehr zu "${returnTarget.name}"`;
+      document.getElementById('status').innerText = info;
+  
+      render();
+    }
+  
+    // 3. Render: Berechnet die Teilstrecke immer von n-1 zu n
+    async function render() {
+      if (!data) return;
+      populateCitySelector();
+      const city = getActiveCity();
+      const list = document.getElementById('poi-list');
+      
+      if (!city || city.pois.length === 0) {
+        list.innerHTML = '<li><em>Keine Orte in dieser Stadt eingetragen.</em></li>';
+        document.getElementById('suggestion-content').innerHTML = 'Bitte Orte im Admin-Bereich anlegen.';
+        return;
+      }
+  
+      if (!currentPos) {
+        currentPos = { lat: city.pois[0].lat, lng: city.pois[0].lng };
+      }
+  
+      list.innerHTML = '<li>Lade Teilstrecken...</li>';
+  
+      // Teilstrecken sequenziell von Punkt zu Punkt berechnen
+      let previousPoint = currentPosEnabled ? currentPos : null;
+      const legDistances = [];
+  
+      for (let i = 0; i < city.pois.length; i++) {
+        const poi = city.pois[i];
+        const isEnabled = poi.enabled !== false && !poi.visited;
+  
+        if (isEnabled && previousPoint) {
+          const dist = await getFootDistance(previousPoint, poi);
+          // Realistische Gehzeit anhand der Meter berechnen
+          dist.duration = Math.max(1, Math.round(dist.distance / 80));
+          legDistances.push({ dist, fromName: previousPoint === currentPos ? "Start (GPS)" : city.pois[i-1]?.name || "Vorheriger Halt" });
+          previousPoint = poi; // Nächster Bezugspunkt
+        } else if (isEnabled && !previousPoint) {
+          legDistances.push({ dist: { distance: 0, duration: 0, type: "Startpunkt" }, fromName: "Start" });
+          previousPoint = poi;
+        } else {
+          // Deaktiviert oder besucht: Distanz von GPS zur Info
+          const d = await getFootDistance(currentPos, poi);
+          d.duration = Math.max(1, Math.round(d.distance / 80));
+          legDistances.push({ dist: d, fromName: "GPS" });
+        }
+      }
+  
+      list.innerHTML = '';
+  
+      // 1. Startpunkt (GPS)
+      const startLi = document.createElement('li');
+      startLi.className = `start-item ${!currentPosEnabled ? 'disabled-item' : ''}`;
+      startLi.innerHTML = `
         <div>
-          <strong>${index + 1}. ${poi.name}</strong>
-          ${!isEnabled ? '<span class="badge badge-disabled">Pausiert</span>' : ''}
+          <strong>🚀 Start: Aktuelle Position</strong>
+          <span class="badge ${currentPosEnabled ? '' : 'badge-disabled'}">${currentPosEnabled ? 'Start aktiv' : 'Pausiert'}</span>
           <div class="metric-info">
-            ${isEnabled ? `${distInfo.distance} m ab aktuellem GPS (~${distInfo.duration} Min.) • <em>${distInfo.type}</em>` : '<em>In Route deaktiviert</em>'}
+            GPS: ${currentPos.lat.toFixed(4)}, ${currentPos.lng.toFixed(4)}
           </div>
         </div>
         <div class="action-group">
-          <button class="small ${isEnabled ? 'toggle-active' : 'toggle-inactive'}" 
-                  onclick="togglePoiEnabled(${poi.id})" 
-                  title="${isEnabled ? 'Aus Route ausschließen' : 'In Route einschließen'}">
-            ${isEnabled ? '👁 Aktiv' : '⏸ Pausiert'}
+          <button class="small ${currentPosEnabled ? 'toggle-active' : 'toggle-inactive'}" onclick="toggleCurrentPos()">
+            ${currentPosEnabled ? '👁 Aktiv' : '⏸ Pausiert'}
           </button>
-          ${!poi.visited ? `<button class="success small" onclick="markVisited(${poi.id})" title="Als besucht markieren">✓</button>` : ''}
         </div>
       `;
-      list.appendChild(li);
-    });
-
-    // 3. Gemerkter Rückkehrpunkt ganz unten
-    if (startPoint) {
-      const isEnabled = startPoint.enabled !== false;
-      const endDist = await getFootDistance(currentPos, startPoint);
-      const endLi = document.createElement('li');
-      endLi.className = `start-endpoint ${!isEnabled ? 'disabled-item' : ''}`;
-      endLi.innerHTML = `
-        <div>
-          <strong>🏁 Ziel / Rückkehr: ${startPoint.name}</strong>
-          <span class="badge ${isEnabled ? '' : 'badge-disabled'}">${isEnabled ? 'Aktiv' : 'Pausiert'}</span>
-          <div class="metric-info">
-            ${isEnabled ? `${endDist.distance} m ab aktuellem GPS (~${endDist.duration} Min.)` : '<em>Rückkehr nicht in Route</em>'}
+      list.appendChild(startLi);
+  
+      // 2. POIs mit Teilstrecke (n-1 -> n)
+      city.pois.forEach((poi, index) => {
+        const isEnabled = poi.enabled !== false;
+        const leg = legDistances[index];
+        const li = document.createElement('li');
+        li.className = `${poi.visited ? 'visited' : ''} ${!isEnabled ? 'disabled-item' : ''}`;
+        
+        let infoText = "";
+        if (poi.visited) {
+          infoText = "<em>Bereits besucht</em>";
+        } else if (!isEnabled) {
+          infoText = "<em>In Route deaktiviert</em>";
+        } else if (leg.fromName === "Start") {
+          infoText = "<em>Erster Halt der Route</em>";
+        } else {
+          infoText = `<strong>${leg.dist.distance} m</strong> (~${leg.dist.duration} Min. zu Fuß ab <em>${leg.fromName}</em>)`;
+        }
+  
+        li.innerHTML = `
+          <div>
+            <strong>${index + 1}. ${poi.name}</strong>
+            ${!isEnabled ? '<span class="badge badge-disabled">Pausiert</span>' : ''}
+            <div class="metric-info">${infoText}</div>
           </div>
-        </div>
-        <div class="action-group">
-          <button class="small ${isEnabled ? 'toggle-active' : 'toggle-inactive'}" onclick="toggleStartPoint()">
-            ${isEnabled ? '👁 Aktiv' : '⏸ Pausiert'}
-          </button>
-          <button class="danger-small" onclick="clearStartPoint()" title="Löschen">✕</button>
-        </div>
-      `;
-      list.appendChild(endLi);
+          <div class="action-group">
+            <button class="small ${isEnabled ? 'toggle-active' : 'toggle-inactive'}" 
+                    onclick="togglePoiEnabled(${poi.id})" 
+                    title="${isEnabled ? 'Aus Route ausschließen' : 'In Route einschließen'}">
+              ${isEnabled ? '👁 Aktiv' : '⏸ Pausiert'}
+            </button>
+            ${!poi.visited ? `<button class="success small" onclick="markVisited(${poi.id})" title="Als besucht markieren">✓</button>` : ''}
+          </div>
+        `;
+        list.appendChild(li);
+      });
+  
+      // 3. Rückkehrziel (Distanz vom letzten aktiven POI)
+      if (startPoint) {
+        const isEnabled = startPoint.enabled !== false;
+        const lastActivePoi = previousPoint || currentPos;
+        const endDist = await getFootDistance(lastActivePoi, startPoint);
+        endDist.duration = Math.max(1, Math.round(endDist.distance / 80));
+  
+        const endLi = document.createElement('li');
+        endLi.className = `start-endpoint ${!isEnabled ? 'disabled-item' : ''}`;
+        endLi.innerHTML = `
+          <div>
+            <strong>🏁 Ziel / Rückkehr: ${startPoint.name}</strong>
+            <span class="badge ${isEnabled ? '' : 'badge-disabled'}">${isEnabled ? 'Aktiv' : 'Pausiert'}</span>
+            <div class="metric-info">
+              ${isEnabled ? `<strong>${endDist.distance} m</strong> (~${endDist.duration} Min. zu Fuß ab letzter Station)` : '<em>Rückkehr nicht in Route</em>'}
+            </div>
+          </div>
+          <div class="action-group">
+            <button class="small ${isEnabled ? 'toggle-active' : 'toggle-inactive'}" onclick="toggleStartPoint()">
+              ${isEnabled ? '👁 Aktiv' : '⏸ Pausiert'}
+            </button>
+            <button class="danger-small" onclick="clearStartPoint()" title="Löschen">✕</button>
+          </div>
+        `;
+        list.appendChild(endLi);
+      }
+  
+      await updateSuggestions();
     }
 
-    await updateSuggestions();
-  }
 
       async function updateSuggestions() {
         const city = getActiveCity();

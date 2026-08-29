@@ -135,6 +135,13 @@
           "lat": 53.3502396,
           "lng": -6.2625549,
           "visited": false
+        },
+        {
+          "id": 1788000394254,
+          "name": "Jonathan Swift",
+          "lat": 53.342475,
+          "lng": -6.2686237,
+          "visited": false
         }
       ]
     },

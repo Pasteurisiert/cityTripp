@@ -330,6 +330,40 @@
           "visited": false
         }
       ]
+    },
+    {
+      "id": "inverness",
+      "name": "Inverness",
+      "pois": [
+        {
+          "id": 1788008023480,
+          "name": "Inverness Castle",
+          "lat": 57.4764335,
+          "lng": -4.2256439,
+          "visited": false
+        },
+        {
+          "id": 1788008120613,
+          "name": "Inverness Museum & Art Gallery",
+          "lat": 57.4770507,
+          "lng": -4.2255199,
+          "visited": false
+        },
+        {
+          "id": 1788008130971,
+          "name": "The Scottish Kiltmaker Visitor Centre",
+          "lat": 57.4770436,
+          "lng": -4.2286909,
+          "visited": false
+        },
+        {
+          "id": 1788008144386,
+          "name": "Inverness Cathedral",
+          "lat": 57.4745541,
+          "lng": -4.2291087,
+          "visited": false
+        }
+      ]
     }
   ]
 }

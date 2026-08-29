@@ -19,8 +19,9 @@
     button.danger-small { background: #ff3b30; color: white; padding: 4px 8px; font-size: 12px; margin-right: 0; margin-bottom: 0; }
     ul { list-style: none; padding: 0; margin: 0; }
     li { padding: 12px 0; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+    li.start-item { background: #eef7ee; border-radius: 8px; padding: 12px; margin-bottom: 10px; border: 1.5px solid #34c759; }
     li.start-endpoint { background: #f0f7ff; border-radius: 8px; padding: 12px; margin-top: 10px; border: 1.5px solid #007aff; }
-    li.disabled-item { background: #f9f9fa; opacity: 0.55; }
+    li.disabled-item { background: #f9f9fa !important; border: 1.5px dashed #c7c7cc !important; opacity: 0.6; }
     li.disabled-item strong { text-decoration: line-through; color: #8e8e93; }
     .visited { text-decoration: line-through; color: #8e8e93; }
     .badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #007aff; color: white; font-weight: 600; margin-left: 6px; }
@@ -58,7 +59,7 @@
 
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center;">
-      <h3 style="margin:0;">Geplante Stationen & Rückweg</h3>
+      <h3 style="margin:0;">Geplante Stationen & Route</h3>
       <button class="secondary small" onclick="resetVisitedStatus()">Besuche zurücksetzen</button>
     </div>
     <ul id="poi-list" style="margin-top: 12px;"></ul>
@@ -69,7 +70,8 @@
   let data = null;
   let activeCityId = null;
   let currentPos = null;
-  let startPoint = null; // { name, lat, lng, enabled: boolean }
+  let currentPosEnabled = true; // Toggle für aktuellen GPS-Startpunkt
+  let startPoint = null; // Fester gemerkter Ausgangs-/Endpunkt
   let distanceCache = {};
 
   async function loadFromGitHub() {
@@ -79,7 +81,6 @@
       if (!res.ok) throw new Error("trips.json nicht erreichbar");
       data = await res.json();
       
-      // Initialisiere enabled-Eigenschaft für alle POIs
       data.cities.forEach(city => {
         city.pois.forEach(poi => {
           if (poi.enabled === undefined) poi.enabled = true;
@@ -121,12 +122,12 @@
       alert("GPS-Position noch nicht erfasst. Bitte kurz warten oder GPS aktivieren.");
       return;
     }
-    const name = prompt("Name für Ausgangs-/Rückkehrpunkt (z. B. Mein Hotel, Bahnhof):", "Mein Hotel / Ausgangspunkt");
+    const name = prompt("Name für Ausgangs-/Rückkehrpunkt (z. B. Hotel, Bahnhof):", "Mein Hotel / Ausgangspunkt");
     if (!name) return;
 
     startPoint = { name: name, lat: currentPos.lat, lng: currentPos.lng, enabled: true };
     saveStartPoint();
-    document.getElementById('status').innerText = `Ausgangspunkt gesetzt: "${name}"`;
+    document.getElementById('status').innerText = `Rückkehrpunkt gesetzt: "${name}"`;
     render();
   }
 
@@ -141,6 +142,11 @@
   function clearStartPoint() {
     startPoint = null;
     saveStartPoint();
+    render();
+  }
+
+  function toggleCurrentPos() {
+    currentPosEnabled = !currentPosEnabled;
     render();
   }
 
@@ -218,13 +224,15 @@
     let curr = origin;
 
     for (let point of route) {
-      const metric = await getFootDistance(curr, point);
-      totalDist += metric.distance;
-      totalDur += metric.duration;
+      if (curr) {
+        const metric = await getFootDistance(curr, point);
+        totalDist += metric.distance;
+        totalDur += metric.duration;
+      }
       curr = point;
     }
 
-    if (endTarget) {
+    if (endTarget && curr) {
       const returnMetric = await getFootDistance(curr, endTarget);
       totalDist += returnMetric.distance;
       totalDur += returnMetric.duration;
@@ -243,13 +251,15 @@
       return;
     }
 
+    // Startet die Route am aktuellen GPS-Ort oder direkt beim ersten POI?
+    const startOrigin = currentPosEnabled ? currentPos : null;
     const returnTarget = (startPoint && startPoint.enabled !== false) ? startPoint : null;
 
-    document.getElementById('status').innerText = returnTarget 
-      ? "Berechne optimale Rundtour inklusive Rückweg..." 
-      : "Berechne optimale Einweg-Route...";
+    document.getElementById('status').innerText = "Berechne globale Bestroute...";
 
-    const allPoints = [currentPos, ...activeUnvisited];
+    const allPoints = [];
+    if (startOrigin) allPoints.push(startOrigin);
+    allPoints.push(...activeUnvisited);
     if (returnTarget) allPoints.push(returnTarget);
 
     const prefetch = [];
@@ -279,7 +289,9 @@
 
       const allPermutations = permute(activeUnvisited);
       for (let route of allPermutations) {
-        const { totalDist } = await calculateTotalPathWithEnd(currentPos, route, returnTarget);
+        const origin = startOrigin || route[0];
+        const subRoute = startOrigin ? route : route.slice(1);
+        const { totalDist } = await calculateTotalPathWithEnd(origin, subRoute, returnTarget);
         if (totalDist < minTotalDistance) {
           minTotalDistance = totalDist;
           bestOrder = route;
@@ -287,21 +299,25 @@
       }
     } else {
       let pool = [...activeUnvisited];
-      let current = currentPos;
+      let current = startOrigin || pool.shift();
+      if (!startOrigin) bestOrder.push(current);
+
       while (pool.length > 0) {
         let bestI = 0, bDist = Infinity;
         for (let i = 0; i < pool.length; i++) {
           const d = (await getFootDistance(current, pool[i])).distance;
           if (d < bDist) { bDist = d; bestI = i; }
         }
-        bestOrder.push(pool.splice(bestI, 1)[0]);
-        current = bestOrder[bestOrder.length - 1];
+        const next = pool.splice(bestI, 1)[0];
+        bestOrder.push(next);
+        current = next;
       }
     }
 
-    // Aktive sortiert voranstellen, inaktive/bereits besuchte dahinter behalten
     city.pois = [...bestOrder, ...inactiveOrVisited];
-    const metrics = await calculateTotalPathWithEnd(currentPos, bestOrder, returnTarget);
+    const origin = startOrigin || bestOrder[0];
+    const subRoute = startOrigin ? bestOrder : bestOrder.slice(1);
+    const metrics = await calculateTotalPathWithEnd(origin, subRoute, returnTarget);
     
     let info = `Route optimiert (${bestOrder.length} Orte)! Gesamtweg: ${(metrics.totalDist / 1000).toFixed(2)} km (~${metrics.totalDur} Min.)`;
     if (returnTarget) info += ` inkl. Rückkehr zu "${returnTarget.name}"`;
@@ -330,6 +346,27 @@
     const distances = await Promise.all(city.pois.map(p => getFootDistance(currentPos, p)));
 
     list.innerHTML = '';
+
+    // 1. Startpunkt (Aktuelle Position) ganz oben in der Liste
+    const startLi = document.createElement('li');
+    startLi.className = `start-item ${!currentPosEnabled ? 'disabled-item' : ''}`;
+    startLi.innerHTML = `
+      <div>
+        <strong>🚀 Start: Aktuelle Position</strong>
+        <span class="badge ${currentPosEnabled ? '' : 'badge-disabled'}">${currentPosEnabled ? 'Start aktiv' : 'Pausiert'}</span>
+        <div class="metric-info">
+          GPS: ${currentPos.lat.toFixed(4)}, ${currentPos.lng.toFixed(4)}
+        </div>
+      </div>
+      <div class="action-group">
+        <button class="small ${currentPosEnabled ? 'toggle-active' : 'toggle-inactive'}" onclick="toggleCurrentPos()">
+          ${currentPosEnabled ? '👁 Aktiv' : '⏸ Pausiert'}
+        </button>
+      </div>
+    `;
+    list.appendChild(startLi);
+
+    // 2. Reguläre POIs
     city.pois.forEach((poi, index) => {
       const isEnabled = poi.enabled !== false;
       const distInfo = distances[index];
@@ -341,7 +378,7 @@
           <strong>${index + 1}. ${poi.name}</strong>
           ${!isEnabled ? '<span class="badge badge-disabled">Pausiert</span>' : ''}
           <div class="metric-info">
-            ${isEnabled ? `${distInfo.distance} m (~${distInfo.duration} Min.) • <em>${distInfo.type}</em>` : '<em>In Route deaktiviert</em>'}
+            ${isEnabled ? `${distInfo.distance} m ab aktuellem GPS (~${distInfo.duration} Min.) • <em>${distInfo.type}</em>` : '<em>In Route deaktiviert</em>'}
           </div>
         </div>
         <div class="action-group">
@@ -356,7 +393,7 @@
       list.appendChild(li);
     });
 
-    // Start- und Endpunkt mit eigenem Toggle-Knopf
+    // 3. Gemerkter Rückkehrpunkt ganz unten
     if (startPoint) {
       const isEnabled = startPoint.enabled !== false;
       const endDist = await getFootDistance(currentPos, startPoint);
@@ -367,7 +404,7 @@
           <strong>🏁 Ziel / Rückkehr: ${startPoint.name}</strong>
           <span class="badge ${isEnabled ? '' : 'badge-disabled'}">${isEnabled ? 'Aktiv' : 'Pausiert'}</span>
           <div class="metric-info">
-            ${isEnabled ? `${endDist.distance} m direkte Distanz ab aktuellem GPS (~${endDist.duration} Min.)` : '<em>Rückkehr nicht in Route</em>'}
+            ${isEnabled ? `${endDist.distance} m direkte Distanz ab GPS (~${endDist.duration} Min.)` : '<em>Rückkehr nicht in Route</em>'}
           </div>
         </div>
         <div class="action-group">
@@ -385,7 +422,6 @@
 
   async function updateSuggestions() {
     const city = getActiveCity();
-    // Nur unbesuchte UND aktive Orte berücksichtigen
     const unvisitedActive = city.pois.filter(p => !p.visited && p.enabled !== false);
     const container = document.getElementById('suggestion-content');
     const isReturnActive = startPoint && startPoint.enabled !== false;
@@ -395,7 +431,7 @@
         const dHome = await getFootDistance(currentPos, startPoint);
         const homeUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${startPoint.lat},${startPoint.lng}&travelmode=walking`;
         container.innerHTML = `
-          <p>🎉 Alle aktiven Orte besucht oder pausiert!</p>
+          <p>🎉 Alle aktiven Stationen besucht!</p>
           <p><strong>Rückweg zum Ziel:</strong> ${startPoint.name} (${dHome.distance} m, ~${dHome.duration} Min.)</p>
           <a class="nav-btn" href="${homeUrl}" target="_blank">🏨 Zurück zu ${startPoint.name} navigieren</a>
         `;
@@ -425,33 +461,35 @@
 
     // Multi-Stop Route für Google Maps generieren
     let fullRouteUrl = "";
-    const routeStops = [...unvisitedActive];
+    const navOrigin = currentPosEnabled ? currentPos : unvisitedActive[0];
+    const navStops = currentPosEnabled ? [...unvisitedActive] : unvisitedActive.slice(1);
+    
     if (isReturnActive) {
-      routeStops.push(startPoint);
+      navStops.push(startPoint);
     }
 
-    if (routeStops.length === 1) {
+    if (navStops.length === 0) {
       fullRouteUrl = singleNavUrl;
     } else {
-      const routeSlice = routeStops.slice(0, 9);
+      const routeSlice = navStops.slice(0, 9);
       const destination = routeSlice[routeSlice.length - 1];
       const waypoints = routeSlice.slice(0, routeSlice.length - 1)
         .map(p => `${p.lat},${p.lng}`)
         .join('%7C');
 
-      fullRouteUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${destination.lat},${destination.lng}&waypoints=${waypoints}&travelmode=walking`;
+      fullRouteUrl = `https://www.google.com/maps/dir/?api=1&origin=${navOrigin.lat},${navOrigin.lng}&destination=${destination.lat},${destination.lng}&waypoints=${waypoints}&travelmode=walking`;
     }
 
     let html = `<p><strong>Geplant als Nächstes:</strong> ${plannedNext.name} (${distPlanned.distance} m, ~${distPlanned.duration} Min.)</p>`;
     
     if (plannedNext.id !== nearest.id) {
-      html += `<p style="color: #d9534f;"><strong>Kürzerer Fußweg ab hier:</strong> ${nearest.name} (${nearestInfo.distance} m, ~${nearestInfo.duration} Min.)</p>
+      html += `<p style="color: #d9534f;"><strong>Kürzerer Fußweg ab aktuellem Standort:</strong> ${nearest.name} (${nearestInfo.distance} m, ~${nearestInfo.duration} Min.)</p>
                <button onclick="setNext(${nearest.id})">Zu ${nearest.name} wechseln</button>`;
     }
 
     const buttonLabel = isReturnActive 
-      ? `🔄 Gesamte Rundtour (inkl. ${startPoint.name}) in Google Maps öffnen`
-      : `🗺 Gesamte Restroute (${unvisitedActive.length} aktive Stationen) in Google Maps öffnen`;
+      ? `🔄 Gesamte Rundtour (inkl. Rückweg zu ${startPoint.name}) in Google Maps öffnen`
+      : `🗺 Gesamte Route (${unvisitedActive.length} Stationen) in Google Maps öffnen`;
 
     html += `
       <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
@@ -476,6 +514,7 @@
       p.visited = false;
       p.enabled = true;
     });
+    currentPosEnabled = true;
     if (startPoint) {
       startPoint.enabled = true;
       saveStartPoint();

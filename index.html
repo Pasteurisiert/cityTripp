@@ -441,85 +441,80 @@
     await updateSuggestions();
   }
 
-  async function updateSuggestions() {
-    const city = getActiveCity();
-    const unvisitedActive = city.pois.filter(p => !p.visited && p.enabled !== false);
-    const container = document.getElementById('suggestion-content');
-    const isReturnActive = startPoint && startPoint.enabled !== false;
-
-    if (unvisitedActive.length === 0) {
+    async function updateSuggestions() {
+      const city = getActiveCity();
+      const unvisitedActive = city.pois.filter(p => !p.visited && p.enabled !== false);
+      const container = document.getElementById('suggestion-content');
+      const isReturnActive = startPoint && startPoint.enabled !== false;
+  
+      if (unvisitedActive.length === 0) {
+        if (isReturnActive) {
+          const dHome = await getFootDistance(currentPos, startPoint);
+          const homeUrl = `https://www.google.com/maps/dir/${currentPos.lat},${currentPos.lng}/${startPoint.lat},${startPoint.lng}/data=!4m2!4m1!3e2`;
+          container.innerHTML = `
+            <p>🎉 Alle aktiven Stationen besucht!</p>
+            <p><strong>Rückweg zum Ziel:</strong> ${startPoint.name} (${dHome.distance} m, ~${dHome.duration} Min.)</p>
+            <a class="nav-btn" href="${homeUrl}" target="_blank">🏨 Zurück zu ${startPoint.name} navigieren</a>
+          `;
+        } else {
+          container.innerHTML = "🎉 Keine aktiven Stationen mehr offen.";
+        }
+        return;
+      }
+  
+      const plannedNext = unvisitedActive[0];
+      const distPlanned = await getFootDistance(currentPos, plannedNext);
+  
+      let nearest = unvisitedActive[0];
+      let minDist = distPlanned.distance;
+      let nearestInfo = distPlanned;
+  
+      for (let p of unvisitedActive) {
+        const dInfo = await getFootDistance(currentPos, p);
+        if (dInfo.distance < minDist) {
+          minDist = dInfo.distance;
+          nearest = p;
+          nearestInfo = dInfo;
+        }
+      }
+  
+      const navOrigin = currentPosEnabled ? currentPos : unvisitedActive[0];
+      const navStops = currentPosEnabled ? [...unvisitedActive] : unvisitedActive.slice(1);
+      
       if (isReturnActive) {
-        const dHome = await getFootDistance(currentPos, startPoint);
-        const homeUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(currentPos.lat + ',' + currentPos.lng)}&destination=${encodeURIComponent(startPoint.lat + ',' + startPoint.lng)}&travelmode=walking`;
-        container.innerHTML = `
-          <p>🎉 Alle aktiven Stationen besucht!</p>
-          <p><strong>Rückweg zum Ziel:</strong> ${startPoint.name} (${dHome.distance} m, ~${dHome.duration} Min.)</p>
-          <a class="nav-btn" href="${homeUrl}" target="_blank">🏨 Zurück zu ${startPoint.name} navigieren</a>
-        `;
-      } else {
-        container.innerHTML = "🎉 Keine aktiven Stationen mehr offen.";
+        navStops.push(startPoint);
       }
-      return;
-    }
-
-    const plannedNext = unvisitedActive[0];
-    const distPlanned = await getFootDistance(currentPos, plannedNext);
-
-    let nearest = unvisitedActive[0];
-    let minDist = distPlanned.distance;
-    let nearestInfo = distPlanned;
-
-    for (let p of unvisitedActive) {
-      const dInfo = await getFootDistance(currentPos, p);
-      if (dInfo.distance < minDist) {
-        minDist = dInfo.distance;
-        nearest = p;
-        nearestInfo = dInfo;
+  
+      // 1. Einzelziel-Navigation
+      const singleNavUrl = `https://www.google.com/maps/dir/${currentPos.lat},${currentPos.lng}/${plannedNext.lat},${plannedNext.lng}/data=!4m2!4m1!3e2`;
+  
+      // 2. Gesamte Tour (Pfadformat verhindert Encoding-Fehler auf iPad/Desktop)
+      const fullPathPoints = [navOrigin, ...navStops.slice(0, 9)];
+      const fullRouteUrl = "https://www.google.com/maps/dir/" + 
+        fullPathPoints.map(p => `${p.lat},${p.lng}`).join('/') + 
+        "/data=!4m2!4m1!3e2";
+  
+      let html = `<p><strong>Geplant als Nächstes:</strong> ${plannedNext.name} (${distPlanned.distance} m, ~${distPlanned.duration} Min.)</p>`;
+      
+      if (plannedNext.id !== nearest.id) {
+        html += `<p style="color: #d9534f;"><strong>Kürzerer Fußweg ab aktuellem Standort:</strong> ${nearest.name} (${nearestInfo.distance} m, ~${nearestInfo.duration} Min.)</p>
+                 <button onclick="setNext(${nearest.id})">Zu ${nearest.name} wechseln</button>`;
       }
+  
+      const buttonLabel = isReturnActive 
+        ? `🔄 Gesamte Rundtour (inkl. Rückweg zu ${startPoint.name}) in Google Maps öffnen`
+        : `🗺 Gesamte Route (${unvisitedActive.length} Stationen) in Google Maps öffnen`;
+  
+      html += `
+        <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+          <a class="nav-btn" href="${singleNavUrl}" target="_blank">🚶 Nur zum nächsten Halt navigieren</a>
+          <a class="nav-btn" style="background:#007aff;" href="${fullRouteUrl}" target="_blank">${buttonLabel}</a>
+        </div>
+      `;
+  
+      container.innerHTML = html;
     }
 
-    const singleNavUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(currentPos.lat + ',' + currentPos.lng)}&destination=${encodeURIComponent(plannedNext.lat + ',' + plannedNext.lng)}&travelmode=walking`;
-
-    let fullRouteUrl = "";
-    const navOrigin = currentPosEnabled ? currentPos : unvisitedActive[0];
-    const navStops = currentPosEnabled ? [...unvisitedActive] : unvisitedActive.slice(1);
-    
-    if (isReturnActive) {
-      navStops.push(startPoint);
-    }
-
-    if (navStops.length === 0) {
-      fullRouteUrl = singleNavUrl;
-    } else {
-      const routeSlice = navStops.slice(0, 9);
-      const destination = routeSlice[routeSlice.length - 1];
-      const waypoints = routeSlice.slice(0, routeSlice.length - 1)
-        .map(p => `${p.lat},${p.lng}`)
-        .join('%7C');
-
-      fullRouteUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(navOrigin.lat + ',' + navOrigin.lng)}&destination=${encodeURIComponent(destination.lat + ',' + destination.lng)}&waypoints=${encodeURIComponent(waypoints)}&travelmode=walking`;
-    }
-
-    let html = `<p><strong>Geplant als Nächstes:</strong> ${plannedNext.name} (${distPlanned.distance} m, ~${distPlanned.duration} Min.)</p>`;
-    
-    if (plannedNext.id !== nearest.id) {
-      html += `<p style="color: #d9534f;"><strong>Kürzerer Fußweg ab aktuellem Standort:</strong> ${nearest.name} (${nearestInfo.distance} m, ~${nearestInfo.duration} Min.)</p>
-               <button onclick="setNext(${nearest.id})">Zu ${nearest.name} wechseln</button>`;
-    }
-
-    const buttonLabel = isReturnActive 
-      ? `🔄 Gesamte Rundtour (inkl. Rückweg zu ${startPoint.name}) in Google Maps öffnen`
-      : `🗺 Gesamte Route (${unvisitedActive.length} Stationen) in Google Maps öffnen`;
-
-    html += `
-      <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
-        <a class="nav-btn" href="${singleNavUrl}" target="_blank">🚶 Nur zum nächsten Halt navigieren</a>
-        <a class="nav-btn" style="background:#007aff;" href="${fullRouteUrl}" target="_blank">${buttonLabel}</a>
-      </div>
-    `;
-
-    container.innerHTML = html;
-  }
 
   function markVisited(id) {
     const city = getActiveCity();

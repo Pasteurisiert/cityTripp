@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CityTripp - Rundtour-Assistent</title>
+  <title>CityTripp - Routen-Assistent</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background: #f4f4f9; color: #1c1c1e; }
     .container { max-width: 700px; margin: 0 auto; }
@@ -13,12 +13,15 @@
     button { background: #007aff; color: white; border: none; padding: 10px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; margin-right: 6px; margin-bottom: 6px; }
     button.secondary { background: #e5e5ea; color: #1c1c1e; }
     button.success { background: #34c759; }
-    button.small { padding: 4px 8px; font-size: 12px; }
-    button.danger-small { background: #ff3b30; color: white; padding: 4px 8px; font-size: 12px; }
+    button.small { padding: 4px 8px; font-size: 12px; margin-right: 4px; margin-bottom: 0; }
+    button.toggle-active { background: #34c759; color: white; }
+    button.toggle-inactive { background: #8e8e93; color: white; }
+    button.danger-small { background: #ff3b30; color: white; padding: 4px 8px; font-size: 12px; margin-right: 0; margin-bottom: 0; }
     ul { list-style: none; padding: 0; margin: 0; }
     li { padding: 12px 0; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
     li.start-endpoint { background: #f0f7ff; border-radius: 8px; padding: 12px; margin-top: 10px; border: 1.5px solid #007aff; }
-    li.start-endpoint.disabled { background: #f8f8f8; border: 1.5px dashed #c7c7cc; opacity: 0.7; }
+    li.disabled-item { background: #f9f9fa; opacity: 0.55; }
+    li.disabled-item strong { text-decoration: line-through; color: #8e8e93; }
     .visited { text-decoration: line-through; color: #8e8e93; }
     .badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #007aff; color: white; font-weight: 600; margin-left: 6px; }
     .badge-disabled { background: #8e8e93; color: white; }
@@ -66,7 +69,7 @@
   let data = null;
   let activeCityId = null;
   let currentPos = null;
-  let startPoint = null; // { name, lat, lng, enabled: true/false }
+  let startPoint = null; // { name, lat, lng, enabled: boolean }
   let distanceCache = {};
 
   async function loadFromGitHub() {
@@ -76,6 +79,13 @@
       if (!res.ok) throw new Error("trips.json nicht erreichbar");
       data = await res.json();
       
+      // Initialisiere enabled-Eigenschaft für alle POIs
+      data.cities.forEach(city => {
+        city.pois.forEach(poi => {
+          if (poi.enabled === undefined) poi.enabled = true;
+        });
+      });
+
       if (!activeCityId && data.cities.length > 0) {
         activeCityId = data.cities[0].id;
       }
@@ -116,7 +126,7 @@
 
     startPoint = { name: name, lat: currentPos.lat, lng: currentPos.lng, enabled: true };
     saveStartPoint();
-    document.getElementById('status').innerText = `Ausgangspunkt gesetzt: "${name}" (Aktiv)`;
+    document.getElementById('status').innerText = `Ausgangspunkt gesetzt: "${name}"`;
     render();
   }
 
@@ -132,6 +142,15 @@
     startPoint = null;
     saveStartPoint();
     render();
+  }
+
+  function togglePoiEnabled(id) {
+    const city = getActiveCity();
+    const poi = city.pois.find(p => p.id === id);
+    if (poi) {
+      poi.enabled = (poi.enabled === undefined) ? false : !poi.enabled;
+      render();
+    }
   }
 
   function getActiveCity() {
@@ -216,19 +235,21 @@
 
   async function optimizeRemainingRoute() {
     const city = getActiveCity();
-    const visited = city.pois.filter(p => p.visited);
-    let unvisited = city.pois.filter(p => !p.visited);
+    const activeUnvisited = city.pois.filter(p => !p.visited && p.enabled !== false);
+    const inactiveOrVisited = city.pois.filter(p => p.visited || p.enabled === false);
 
-    if (unvisited.length === 0) return;
+    if (activeUnvisited.length === 0) {
+      alert("Keine aktiven, unbesuchten Stationen zum Optimieren ausgewählt.");
+      return;
+    }
 
-    // Rückkehrziel nur verwenden, wenn startPoint existiert und aktiviert ist
-    const returnTarget = (startPoint && startPoint.enabled) ? startPoint : null;
+    const returnTarget = (startPoint && startPoint.enabled !== false) ? startPoint : null;
 
     document.getElementById('status').innerText = returnTarget 
       ? "Berechne optimale Rundtour inklusive Rückweg..." 
       : "Berechne optimale Einweg-Route...";
 
-    const allPoints = [currentPos, ...unvisited];
+    const allPoints = [currentPos, ...activeUnvisited];
     if (returnTarget) allPoints.push(returnTarget);
 
     const prefetch = [];
@@ -242,7 +263,7 @@
     let bestOrder = [];
     let minTotalDistance = Infinity;
 
-    if (unvisited.length <= 8) {
+    if (activeUnvisited.length <= 8) {
       function permute(arr) {
         if (arr.length <= 1) return [arr];
         let result = [];
@@ -256,7 +277,7 @@
         return result;
       }
 
-      const allPermutations = permute(unvisited);
+      const allPermutations = permute(activeUnvisited);
       for (let route of allPermutations) {
         const { totalDist } = await calculateTotalPathWithEnd(currentPos, route, returnTarget);
         if (totalDist < minTotalDistance) {
@@ -265,7 +286,7 @@
         }
       }
     } else {
-      let pool = [...unvisited];
+      let pool = [...activeUnvisited];
       let current = currentPos;
       while (pool.length > 0) {
         let bestI = 0, bDist = Infinity;
@@ -278,10 +299,11 @@
       }
     }
 
-    city.pois = [...visited, ...bestOrder];
+    // Aktive sortiert voranstellen, inaktive/bereits besuchte dahinter behalten
+    city.pois = [...bestOrder, ...inactiveOrVisited];
     const metrics = await calculateTotalPathWithEnd(currentPos, bestOrder, returnTarget);
     
-    let info = `Route optimiert! Gesamtweg: ${(metrics.totalDist / 1000).toFixed(2)} km (~${metrics.totalDur} Min.)`;
+    let info = `Route optimiert (${bestOrder.length} Orte)! Gesamtweg: ${(metrics.totalDist / 1000).toFixed(2)} km (~${metrics.totalDur} Min.)`;
     if (returnTarget) info += ` inkl. Rückkehr zu "${returnTarget.name}"`;
     document.getElementById('status').innerText = info;
 
@@ -309,38 +331,50 @@
 
     list.innerHTML = '';
     city.pois.forEach((poi, index) => {
+      const isEnabled = poi.enabled !== false;
       const distInfo = distances[index];
       const li = document.createElement('li');
-      li.className = poi.visited ? 'visited' : '';
+      li.className = `${poi.visited ? 'visited' : ''} ${!isEnabled ? 'disabled-item' : ''}`;
+      
       li.innerHTML = `
         <div>
           <strong>${index + 1}. ${poi.name}</strong>
-          <div class="metric-info">${distInfo.distance} m (~${distInfo.duration} Min.) • <em>${distInfo.type}</em></div>
+          ${!isEnabled ? '<span class="badge badge-disabled">Pausiert</span>' : ''}
+          <div class="metric-info">
+            ${isEnabled ? `${distInfo.distance} m (~${distInfo.duration} Min.) • <em>${distInfo.type}</em>` : '<em>In Route deaktiviert</em>'}
+          </div>
         </div>
-        <div>
-          ${!poi.visited ? `<button class="success" onclick="markVisited(${poi.id})">✓</button>` : ''}
+        <div class="action-group">
+          <button class="small ${isEnabled ? 'toggle-active' : 'toggle-inactive'}" 
+                  onclick="togglePoiEnabled(${poi.id})" 
+                  title="${isEnabled ? 'Aus Route ausschließen' : 'In Route einschließen'}">
+            ${isEnabled ? '👁 Aktiv' : '⏸ Pausiert'}
+          </button>
+          ${!poi.visited ? `<button class="success small" onclick="markVisited(${poi.id})" title="Als besucht markieren">✓</button>` : ''}
         </div>
       `;
       list.appendChild(li);
     });
 
-    // Start- und Endpunkt als an-/abwählbares Element in der Liste
+    // Start- und Endpunkt mit eigenem Toggle-Knopf
     if (startPoint) {
       const isEnabled = startPoint.enabled !== false;
       const endDist = await getFootDistance(currentPos, startPoint);
       const endLi = document.createElement('li');
-      endLi.className = `start-endpoint ${isEnabled ? '' : 'disabled'}`;
+      endLi.className = `start-endpoint ${!isEnabled ? 'disabled-item' : ''}`;
       endLi.innerHTML = `
         <div>
           <strong>🏁 Ziel / Rückkehr: ${startPoint.name}</strong>
-          <span class="badge ${isEnabled ? '' : 'badge-disabled'}">${isEnabled ? 'Aktiviert' : 'Deaktiviert'}</span>
-          <div class="metric-info">${endDist.distance} m ab aktuellem GPS (~${endDist.duration} Min.)</div>
+          <span class="badge ${isEnabled ? '' : 'badge-disabled'}">${isEnabled ? 'Aktiv' : 'Pausiert'}</span>
+          <div class="metric-info">
+            ${isEnabled ? `${endDist.distance} m direkte Distanz ab aktuellem GPS (~${endDist.duration} Min.)` : '<em>Rückkehr nicht in Route</em>'}
+          </div>
         </div>
         <div class="action-group">
-          <button class="secondary small" onclick="toggleStartPoint()">
-            ${isEnabled ? '⏸ Abwählen' : '▶ Anwählen'}
+          <button class="small ${isEnabled ? 'toggle-active' : 'toggle-inactive'}" onclick="toggleStartPoint()">
+            ${isEnabled ? '👁 Aktiv' : '⏸ Pausiert'}
           </button>
-          <button class="danger-small" onclick="clearStartPoint()">✕</button>
+          <button class="danger-small" onclick="clearStartPoint()" title="Löschen">✕</button>
         </div>
       `;
       list.appendChild(endLi);
@@ -351,33 +385,34 @@
 
   async function updateSuggestions() {
     const city = getActiveCity();
-    const unvisited = city.pois.filter(p => !p.visited);
+    // Nur unbesuchte UND aktive Orte berücksichtigen
+    const unvisitedActive = city.pois.filter(p => !p.visited && p.enabled !== false);
     const container = document.getElementById('suggestion-content');
-    const isReturnActive = startPoint && startPoint.enabled;
+    const isReturnActive = startPoint && startPoint.enabled !== false;
 
-    if (unvisited.length === 0) {
+    if (unvisitedActive.length === 0) {
       if (isReturnActive) {
         const dHome = await getFootDistance(currentPos, startPoint);
         const homeUrl = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.lat},${currentPos.lng}&destination=${startPoint.lat},${startPoint.lng}&travelmode=walking`;
         container.innerHTML = `
-          <p>🎉 Alle Orte besucht!</p>
+          <p>🎉 Alle aktiven Orte besucht oder pausiert!</p>
           <p><strong>Rückweg zum Ziel:</strong> ${startPoint.name} (${dHome.distance} m, ~${dHome.duration} Min.)</p>
           <a class="nav-btn" href="${homeUrl}" target="_blank">🏨 Zurück zu ${startPoint.name} navigieren</a>
         `;
       } else {
-        container.innerHTML = "🎉 Alle Sehenswürdigkeiten in dieser Stadt besucht!";
+        container.innerHTML = "🎉 Keine aktiven Stationen mehr offen.";
       }
       return;
     }
 
-    const plannedNext = unvisited[0];
+    const plannedNext = unvisitedActive[0];
     const distPlanned = await getFootDistance(currentPos, plannedNext);
 
-    let nearest = unvisited[0];
+    let nearest = unvisitedActive[0];
     let minDist = distPlanned.distance;
     let nearestInfo = distPlanned;
 
-    for (let p of unvisited) {
+    for (let p of unvisitedActive) {
       const dInfo = await getFootDistance(currentPos, p);
       if (dInfo.distance < minDist) {
         minDist = dInfo.distance;
@@ -390,7 +425,7 @@
 
     // Multi-Stop Route für Google Maps generieren
     let fullRouteUrl = "";
-    const routeStops = [...unvisited];
+    const routeStops = [...unvisitedActive];
     if (isReturnActive) {
       routeStops.push(startPoint);
     }
@@ -416,7 +451,7 @@
 
     const buttonLabel = isReturnActive 
       ? `🔄 Gesamte Rundtour (inkl. ${startPoint.name}) in Google Maps öffnen`
-      : `🗺 Gesamte Restroute (${unvisited.length} Stationen) in Google Maps öffnen`;
+      : `🗺 Gesamte Restroute (${unvisitedActive.length} aktive Stationen) in Google Maps öffnen`;
 
     html += `
       <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
@@ -437,7 +472,14 @@
 
   function resetVisitedStatus() {
     const city = getActiveCity();
-    city.pois.forEach(p => p.visited = false);
+    city.pois.forEach(p => {
+      p.visited = false;
+      p.enabled = true;
+    });
+    if (startPoint) {
+      startPoint.enabled = true;
+      saveStartPoint();
+    }
     render();
   }
 
@@ -445,8 +487,8 @@
     const city = getActiveCity();
     const idx = city.pois.findIndex(p => p.id === id);
     const [item] = city.pois.splice(idx, 1);
-    const firstUnvisitedIdx = city.pois.findIndex(p => !p.visited);
-    city.pois.splice(firstUnvisitedIdx, 0, item);
+    const firstUnvisitedIdx = city.pois.findIndex(p => !p.visited && p.enabled !== false);
+    city.pois.splice(firstUnvisitedIdx >= 0 ? firstUnvisitedIdx : 0, 0, item);
     render();
   }
 
